@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/* ── Coderina "Checkmate" brand theme ───────────────────────────────
+   Palette pulled from coderina.org: gold/amber primary, teal secondary,
+   red accent, near-black board surfaces. ----------------------------- */
+@theme {
+  /* Primary — gold / amber */
+  --color-gold-50: #fff9f0;
+  --color-gold-100: #fad9a0;
+  --color-gold-200: #f4c47e;
+  --color-gold-300: #f9a826;
+  --color-gold-400: #e29818;
+  --color-gold-500: #c27f0f;
+  --color-gold-600: #8b5a04;
+  --color-gold-700: #7a4f03;
+
+  /* Secondary — teal */
+  --color-teal-50: #f0fdfa;
+  --color-teal-200: #96f7e4;
+  --color-teal-400: #00baa7;
+  --color-teal-600: #0a8a7d;
+
+  /* Primary — brand red (from the logo) */
+  --color-brandred-50: #fff1f2;
+  --color-brandred-300: #ff6670;
+  --color-brandred-400: #fb2c36;
+  --color-brandred-500: #e40014;
+  --color-brandred-600: #bf000f;
+  --color-brandred-700: #8f0410;
+
+  /* Checkmate pillar colors (from the official logo + brand graphics) */
+  --color-pillarred: #e40014;
+  --color-pillarblue: #21a9e1;
+  --color-pillargreen: #0f8a3c;
+  --color-pillargold: #f5b417;
+
+  /* Board / neutral surfaces */
+  --color-board-950: #030712;
+  --color-board-900: #0b1120;
+  --color-board-800: #101828;
+  --color-board-700: #18181b;
+  --color-board-600: #232a3b;
+
+  /* Fonts */
+  --font-sans: "DM Sans", "Roboto", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Roboto", "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-body);
+    background-color: var(--color-board-950);
+    background-image:
+      radial-gradient(1100px 520px at 50% -8%, rgba(228, 0, 20, 0.16), transparent 60%),
+      radial-gradient(900px 600px at 100% 0%, rgba(143, 4, 16, 0.12), transparent 55%);
+    background-attachment: fixed;
+    color: #e7eaf0;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, .font-display {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+  }
+  a { color: inherit; text-decoration: none; }
+}
+
+/* Subtle chessboard texture used behind hero / section accents */
+.bg-board-grid {
+  background-image:
+    linear-gradient(45deg, rgba(228, 0, 20, 0.06) 25%, transparent 25%, transparent 75%, rgba(228, 0, 20, 0.06) 75%),
+    linear-gradient(45deg, rgba(228, 0, 20, 0.06) 25%, transparent 25%, transparent 75%, rgba(228, 0, 20, 0.06) 75%);
+  background-size: 56px 56px;
+  background-position: 0 0, 28px 28px;
+}
+
+.text-gradient-gold {
+  background: linear-gradient(95deg, #fb2c36, #e40014 45%, #ff6670);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0b1120; }
+::-webkit-scrollbar-thumb { background: #232a3b; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #e40014; }
