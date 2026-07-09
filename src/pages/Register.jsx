@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { UserPlus, Users, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { UserPlus, Users, UserCog, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Button, Card } from '../components/ui.jsx';
 import { KingGlyph } from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Register() {
-  const { registerCaptain, registerMember } = useAuth();
+  const { registerCaptain, registerMember, registerCoach } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState('captain'); // 'captain' | 'member'
   const [form, setForm] = useState({
@@ -29,12 +29,18 @@ export default function Register() {
           displayName: form.displayName.trim(), teamName: form.teamName.trim(),
         });
         setDone({ kind: 'captain', joinCode: team.joinCode, teamName: team.name });
-      } else {
+      } else if (mode === 'member') {
         const { team } = await registerMember({
           email: form.email.trim(), password: form.password,
           displayName: form.displayName.trim(), joinCode: form.joinCode.trim(),
         });
         setDone({ kind: 'member', teamName: team.name });
+      } else {
+        await registerCoach({
+          email: form.email.trim(), password: form.password,
+          displayName: form.displayName.trim(),
+        });
+        setDone({ kind: 'coach' });
       }
     } catch (err) {
       setError(err.message);
@@ -59,13 +65,20 @@ export default function Register() {
               <p className="mt-2 font-mono text-2xl font-bold tracking-widest text-brandred-400">{done.joinCode}</p>
             </Card>
           </>
-        ) : (
+        ) : done.kind === 'member' ? (
           <p className="mt-3 text-gray-300">
             You've joined <span className="font-semibold text-brandred-400">{done.teamName}</span>.
             Your team is active once organizers approve it.
           </p>
+        ) : (
+          <p className="mt-3 text-gray-300">
+            Your <span className="font-semibold text-brandred-400">coach account</span> is ready.
+            Create and manage your teams from your coach dashboard.
+          </p>
         )}
-        <Button to="/dashboard" className="mt-8">Go to your dashboard</Button>
+        <Button to={done.kind === 'coach' ? '/coach' : '/dashboard'} className="mt-8">
+          {done.kind === 'coach' ? 'Go to my teams' : 'Go to your dashboard'}
+        </Button>
       </div>
     );
   }
@@ -79,12 +92,15 @@ export default function Register() {
       </div>
 
       {/* Mode toggle */}
-      <div className="mb-6 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-board-900 p-1">
+      <div className="mb-6 grid grid-cols-3 gap-2 rounded-xl border border-white/10 bg-board-900 p-1">
         <ToggleBtn active={mode === 'captain'} onClick={() => setMode('captain')} icon={Users}>
-          Create a team
+          Create team
         </ToggleBtn>
         <ToggleBtn active={mode === 'member'} onClick={() => setMode('member')} icon={UserPlus}>
-          Join a team
+          Join team
+        </ToggleBtn>
+        <ToggleBtn active={mode === 'coach'} onClick={() => setMode('coach')} icon={UserCog}>
+          Coach
         </ToggleBtn>
       </div>
 
@@ -94,9 +110,10 @@ export default function Register() {
           <Field label="Email" type="email" value={form.email} onChange={set('email')} required />
           <Field label="Password" type="password" value={form.password} onChange={set('password')} required minLength={6} />
 
-          {mode === 'captain' ? (
+          {mode === 'captain' && (
             <Field label="Team name" value={form.teamName} onChange={set('teamName')} required placeholder="e.g. Royal Knights" />
-          ) : (
+          )}
+          {mode === 'member' && (
             <Field label="Team join code" value={form.joinCode} onChange={set('joinCode')} required placeholder="6-character code" />
           )}
 
@@ -107,7 +124,7 @@ export default function Register() {
           )}
 
           <Button as="button" type="submit" className="w-full" disabled={busy}>
-            {busy ? 'Submitting…' : mode === 'captain' ? 'Register team' : 'Join team'}
+            {busy ? 'Submitting…' : mode === 'captain' ? 'Register team' : mode === 'member' ? 'Join team' : 'Create coach account'}
           </Button>
         </form>
 
@@ -120,7 +137,9 @@ export default function Register() {
       <p className="mt-4 text-center text-xs text-gray-500">
         {mode === 'captain'
           ? 'As captain you’ll get a join code to invite teammates. New teams require organizer approval.'
-          : 'Ask your team captain for the join code they received at registration.'}
+          : mode === 'member'
+          ? 'Ask your team captain for the join code they received at registration.'
+          : 'Coaches create and manage multiple teams from a single dashboard.'}
       </p>
     </div>
   );

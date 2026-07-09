@@ -6,8 +6,11 @@ import { Card, Button, StatusPill, TeamMark } from '../components/ui.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
 import {
   approveTeam, rejectTeam, deleteTeam, updatePlayer, createMatches, updateMatch,
-  deleteMatchesForRound, updateTournament, updateTeam, resetData,
+  deleteMatchesForRound, updateTournament, updateTeam, loadSampleData, clearData,
+  createGame, completeGame,
 } from '../lib/api.js';
+import { Link } from 'react-router-dom';
+import { Play } from 'lucide-react';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
 import { fmtScore, fmtDate, teamName } from '../lib/format.js';
 
@@ -19,7 +22,7 @@ const TABS = [
 ];
 
 export default function Admin() {
-  const { teams, players, matches, leaderboard, tournament } = useCheckmate();
+  const { teams, players, matches, games, leaderboard, tournament } = useCheckmate();
   const [tab, setTab] = useState('approvals');
 
   const pending = teams.filter((t) => t.status === 'pending');
@@ -31,9 +34,14 @@ export default function Admin() {
           <h1 className="text-3xl font-semibold text-white">Organizer panel</h1>
           <p className="mt-1 text-sm text-gray-400">{tournament?.name} · Round {tournament?.currentRound}</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => { if (confirm('Reset all demo data to seed?')) resetData(); }}>
-          <RefreshCw className="h-4 w-4" /> Reset demo data
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="sm" onClick={() => { if (confirm('Load the sample teams, players and a live game? This replaces current data.')) loadSampleData(); }}>
+            <RefreshCw className="h-4 w-4" /> Load sample data
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => { if (confirm('Clear ALL data back to an empty competition?')) clearData(); }}>
+            <Trash2 className="h-4 w-4" /> Clear all
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -58,7 +66,7 @@ export default function Admin() {
 
       {tab === 'approvals' && <Approvals pending={pending} players={players} />}
       {tab === 'scores' && <Scores teams={teams} players={players} leaderboard={leaderboard} />}
-      {tab === 'matches' && <MatchesAdmin teams={teams} matches={matches} tournament={tournament} />}
+      {tab === 'matches' && <MatchesAdmin teams={teams} players={players} matches={matches} games={games} tournament={tournament} />}
       {tab === 'round' && <RoundControl teams={teams} leaderboard={leaderboard} tournament={tournament} />}
     </div>
   );
@@ -160,22 +168,34 @@ function Scores({ teams, players, leaderboard }) {
   );
 }
 
-/* ── Matches ───────────────────────────────────────────────────────────── */
-function MatchesAdmin({ teams, matches, tournament }) {
+/* ── Matches & board games ─────────────────────────────────────────────── */
+function captainOf(players, teamId) {
+  const roster = players.filter((p) => p.teamId === teamId);
+  return roster.find((p) => p.isCaptain) || roster[0] || null;
+}
+
+function MatchesAdmin({ teams, players, matches, games, tournament }) {
   const [format, setFormat] = useState(DEFAULT_FORMAT);
   const round = tournament?.currentRound ?? 1;
-  const activeIds = teams.filter((t) => t.status === 'active' || t.status === 'advanced').map((t) => t.id);
-  const roundMatches = useMemo(
-    () => matches.filter((m) => m.round === round).sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)),
-    [matches, round]
-  );
+  const activeTeams = teams.filter((t) => t.status === 'active' || t.status === 'advanced');
+  const activeIds = activeTeams.map((t) => t.id);
+  const roundGames = useMemo(() => games.filter((g) => g.round === round), [games, round]);
 
+  // Generate round-robin fixtures AND a playable board (captain vs captain) per match.
   const generate = async () => {
-    if (activeIds.length < 2) return alert('Need at least 2 active teams to generate matches.');
-    if (roundMatches.length && !confirm(`Replace the ${roundMatches.length} existing match(es) for round ${round}?`)) return;
+    if (activeIds.length < 2) return alert('Need at least 2 active teams to generate fixtures.');
+    const existing = matches.filter((m) => m.round === round);
+    if (existing.length && !confirm(`Replace round ${round}'s ${existing.length} fixture(s) and their games?`)) return;
     await deleteMatchesForRound(round);
     const recs = generateMatches(format, activeIds, round);
-    await createMatches(recs);
+    const created = await createMatches(recs);
+    for (const m of created) {
+      const wc = captainOf(players, m.teamAId);
+      const bc = captainOf(players, m.teamBId);
+      if (wc && bc) {
+        await createGame({ matchId: m.id, round, whiteTeamId: m.teamAId, whitePlayerId: wc.id, blackTeamId: m.teamBId, blackPlayerId: bc.id });
+      }
+    }
   };
 
   return (
@@ -183,15 +203,13 @@ function MatchesAdmin({ teams, matches, tournament }) {
       <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 className="font-medium text-white">Generate fixtures · Round {round}</h3>
-          <p className="mt-1 text-sm text-gray-400">{activeIds.length} active teams. Format is swappable as the competition format is finalized.</p>
+          <p className="mt-1 text-sm text-gray-400">{activeIds.length} active teams. Each fixture gets a playable board (team captains); add more boards below.</p>
         </div>
         <div className="flex items-end gap-2">
           <label className="text-sm">
             <span className="mb-1 block text-gray-400">Format</span>
-            <select
-              value={format} onChange={(e) => setFormat(e.target.value)}
-              className="rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500"
-            >
+            <select value={format} onChange={(e) => setFormat(e.target.value)}
+              className="rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500">
               {FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
             </select>
           </label>
@@ -199,39 +217,90 @@ function MatchesAdmin({ teams, matches, tournament }) {
         </div>
       </Card>
 
-      <div className="space-y-3">
-        {roundMatches.length ? roundMatches.map((m) => (
-          <MatchRow key={m.id} match={m} teams={teams} />
-        )) : (
-          <Card className="p-8 text-center text-sm text-gray-400">No matches for round {round}. Generate fixtures above.</Card>
-        )}
+      <NewGameForm teams={activeTeams} players={players} round={round} />
+
+      <div>
+        <h3 className="mb-3 text-sm font-semibold text-white">Board games · Round {round}</h3>
+        <div className="space-y-3">
+          {roundGames.length ? roundGames.map((g) => (
+            <GameRow key={g.id} game={g} teams={teams} players={players} />
+          )) : (
+            <Card className="p-8 text-center text-sm text-gray-400">No board games yet. Generate fixtures or add a board above.</Card>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function MatchRow({ match, teams }) {
-  const [a, setA] = useState(match.scoreA);
-  const [b, setB] = useState(match.scoreB);
+function NewGameForm({ teams, players, round }) {
+  const [wT, setWT] = useState(''); const [wP, setWP] = useState('');
+  const [bT, setBT] = useState(''); const [bP, setBP] = useState('');
+  const roster = (tid) => players.filter((p) => p.teamId === tid);
 
-  const save = (status) =>
-    updateMatch(match.id, { scoreA: parseFloat(a) || 0, scoreB: parseFloat(b) || 0, status });
+  const create = async () => {
+    if (!wT || !wP || !bT || !bP) return alert('Pick both players.');
+    if (wT === bT) return alert('Pick two different teams.');
+    await createGame({ round, whiteTeamId: wT, whitePlayerId: wP, blackTeamId: bT, blackPlayerId: bP });
+    setWP(''); setBP('');
+  };
+
+  const Select = ({ value, onChange, children }) => (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      className="rounded-lg border border-white/10 bg-board-900 px-2 py-1.5 text-sm text-white outline-none focus:border-brandred-500">
+      {children}
+    </select>
+  );
 
   return (
-    <Card className="grid grid-cols-1 items-center gap-3 p-4 sm:grid-cols-[1fr_auto_auto]">
-      <div className="flex items-center gap-2 text-sm">
-        <span className="w-32 truncate text-right text-gray-200">{teamName(teams, match.teamAId)}</span>
-        <input type="number" step="0.5" min="0" value={a} onChange={(e) => setA(e.target.value)}
-          className="w-16 rounded-lg border border-white/10 bg-board-900 px-2 py-1.5 text-center font-mono text-white outline-none focus:border-brandred-500" />
+    <Card className="p-5">
+      <h3 className="mb-3 text-sm font-semibold text-white">Add a board game</h3>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Select value={wT} onChange={(v) => { setWT(v); setWP(''); }}>
+          <option value="">White team…</option>
+          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </Select>
+        <Select value={wP} onChange={setWP}>
+          <option value="">Player…</option>
+          {roster(wT).map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+        </Select>
         <span className="text-gray-500">vs</span>
-        <input type="number" step="0.5" min="0" value={b} onChange={(e) => setB(e.target.value)}
-          className="w-16 rounded-lg border border-white/10 bg-board-900 px-2 py-1.5 text-center font-mono text-white outline-none focus:border-brandred-500" />
-        <span className="w-32 truncate text-gray-200">{teamName(teams, match.teamBId)}</span>
+        <Select value={bT} onChange={(v) => { setBT(v); setBP(''); }}>
+          <option value="">Black team…</option>
+          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </Select>
+        <Select value={bP} onChange={setBP}>
+          <option value="">Player…</option>
+          {roster(bT).map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+        </Select>
+        <Button size="sm" onClick={create}>Add board</Button>
       </div>
-      <StatusPill status={match.status} className="justify-self-start sm:justify-self-center" />
-      <div className="flex gap-2 justify-self-start sm:justify-self-end">
-        <Button size="sm" variant="outline" onClick={() => save('scheduled')}><Save className="h-3.5 w-3.5" /> Save</Button>
-        <Button size="sm" variant="success" onClick={() => save('completed')}><CheckCircle2 className="h-3.5 w-3.5" /> Complete</Button>
+    </Card>
+  );
+}
+
+function GameRow({ game, teams, players }) {
+  const pName = (id) => players.find((p) => p.id === id)?.displayName || 'TBD';
+  return (
+    <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+      <div className="text-sm">
+        <span className="text-gray-200">{teamName(teams, game.whiteTeamId)}</span>
+        <span className="text-gray-500"> ({pName(game.whitePlayerId)}) vs </span>
+        <span className="text-gray-200">{teamName(teams, game.blackTeamId)}</span>
+        <span className="text-gray-500"> ({pName(game.blackPlayerId)})</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <StatusPill status={game.status} />
+        <Link to={`/play/${game.id}`}>
+          <Button size="sm" variant="outline"><Play className="h-3.5 w-3.5" /> Open board</Button>
+        </Link>
+        {game.status !== 'completed' && (
+          <div className="flex gap-1">
+            <Button size="sm" variant="success" onClick={() => completeGame(game.id, 'white')}>1–0</Button>
+            <Button size="sm" variant="outline" onClick={() => completeGame(game.id, 'draw')}>½</Button>
+            <Button size="sm" variant="success" onClick={() => completeGame(game.id, 'black')}>0–1</Button>
+          </div>
+        )}
       </div>
     </Card>
   );

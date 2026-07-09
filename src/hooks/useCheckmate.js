@@ -1,29 +1,33 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  listTeams, listPlayers, listMatches, getTournament, onChange,
+  listTeams, listPlayers, listMatches, listGames, getTournament, onChange,
 } from '../lib/api.js';
 import { buildLeaderboard } from '../lib/scoring.js';
 
 /**
- * Loads all competition data and keeps it in sync with the data layer.
- * Returns teams, players, matches, tournament, a computed leaderboard, and a
- * loading flag. Re-fetches automatically whenever the data layer changes.
+ * Loads all competition data and keeps it in sync with the data layer —
+ * including live games, so the scoreboard updates automatically as results
+ * come in (across tabs/devices via the realtime channel in api.js).
  */
 export function useCheckmate() {
   const [state, setState] = useState({
-    teams: [], players: [], matches: [], tournament: null,
-    leaderboard: [], leaderboardLive: false, loading: true,
+    teams: [], players: [], matches: [], games: [], tournament: null,
+    leaderboard: [], leaderboardLive: false, hasTeams: false, loading: true,
   });
 
   const refresh = useCallback(async () => {
-    const [teams, players, matches, tournament] = await Promise.all([
-      listTeams(), listPlayers(), listMatches(), getTournament(),
+    const [teams, players, matches, games, tournament] = await Promise.all([
+      listTeams(), listPlayers(), listMatches(), listGames(), getTournament(),
     ]);
     const leaderboard = buildLeaderboard(teams, players, tournament?.advanceCount ?? 6);
-    // The public leaderboard stays hidden until the first match has been played;
-    // once any match is completed it automatically goes live everywhere.
-    const leaderboardLive = matches.some((m) => m.status === 'completed');
-    setState({ teams, players, matches, tournament, leaderboard, leaderboardLive, loading: false });
+    // Registration has started once any team is active.
+    const hasTeams = teams.some((t) => t.status === 'active' || t.status === 'advanced');
+    // Standings go live once matches officially start — i.e. any game is live or
+    // done (or a match has been scored) — then auto-appear everywhere.
+    const leaderboardLive =
+      games.some((g) => g.status === 'live' || g.status === 'completed') ||
+      matches.some((m) => m.status === 'live' || m.status === 'completed');
+    setState({ teams, players, matches, games, tournament, leaderboard, leaderboardLive, hasTeams, loading: false });
   }, []);
 
   useEffect(() => {

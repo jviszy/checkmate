@@ -19,3 +19,13 @@ export function AdminRoute({ children }) {
   if (!isAdmin) return <Navigate to="/dashboard" replace />;
   return children;
 }
+
+/** Requires a signed-in coach. */
+export function CoachRoute({ children }) {
+  const { isAuthed, isCoach, loading } = useAuth();
+  const location = useLocation();
+  if (loading) return null;
+  if (!isAuthed) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (!isCoach) return <Navigate to="/dashboard" replace />;
+  return children;
+}

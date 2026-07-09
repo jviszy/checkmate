@@ -8,7 +8,7 @@ import { useCheckmate } from '../hooks/useCheckmate.js';
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
-  const { isAuthed, isAdmin, user, signOut } = useAuth();
+  const { isAuthed, isAdmin, isCoach, user, signOut } = useAuth();
   const { leaderboardLive } = useCheckmate();
   const navigate = useNavigate();
 
@@ -41,7 +41,10 @@ export default function Navbar() {
               {l.label}
             </NavLink>
           ))}
-          {isAuthed && (
+          {isCoach && (
+            <NavLink to="/coach" className={linkClass}>My teams</NavLink>
+          )}
+          {isAuthed && !isCoach && !isAdmin && (
             <NavLink to="/dashboard" className={linkClass}>Dashboard</NavLink>
           )}
           {isAdmin && (
@@ -82,7 +85,12 @@ export default function Navbar() {
                 {l.label}
               </NavLink>
             ))}
-            {isAuthed && (
+            {isCoach && (
+              <NavLink to="/coach" className={linkClass} onClick={() => setOpen(false)}>
+                <LayoutDashboard className="mr-1 inline h-4 w-4" /> My teams
+              </NavLink>
+            )}
+            {isAuthed && !isCoach && !isAdmin && (
               <NavLink to="/dashboard" className={linkClass} onClick={() => setOpen(false)}>
                 <LayoutDashboard className="mr-1 inline h-4 w-4" /> Dashboard
               </NavLink>

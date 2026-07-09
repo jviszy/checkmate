@@ -4,14 +4,14 @@ import {
   Trophy, Users, Hash, TrendingUp, Crown, ShieldAlert, Star,
 } from 'lucide-react';
 import { Card, StatusPill, TeamMark, Button } from '../components/ui.jsx';
-import MatchCard from '../components/MatchCard.jsx';
+import GameCard from '../components/GameCard.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { fmtScore } from '../lib/format.js';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { teams, players, matches, leaderboard, tournament } = useCheckmate();
+  const { teams, players, games, leaderboard, tournament } = useCheckmate();
 
   const team = teams.find((t) => t.id === user?.teamId);
   const row = leaderboard.find((r) => r.id === user?.teamId);
@@ -20,11 +20,10 @@ export default function Dashboard() {
       .sort((a, b) => b.individualScore - a.individualScore),
     [players, user]
   );
-  const teamMatches = useMemo(
-    () => matches
-      .filter((m) => m.teamAId === team?.id || m.teamBId === team?.id)
-      .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)),
-    [matches, team]
+  // The games this player is actually seated at.
+  const myGames = useMemo(
+    () => games.filter((g) => g.whitePlayerId === user?.playerId || g.blackPlayerId === user?.playerId),
+    [games, user]
   );
 
   if (!team) {
@@ -42,8 +41,9 @@ export default function Dashboard() {
   const total = row?.total ?? 0;
   const rank = row?.rank ?? '—';
   const advancing = row?.advancing;
-  const upcoming = teamMatches.filter((m) => m.status !== 'completed');
-  const previous = teamMatches.filter((m) => m.status === 'completed');
+  const liveGames = myGames.filter((g) => g.status === 'live');
+  const upcomingGames = myGames.filter((g) => g.status === 'scheduled');
+  const pastGames = myGames.filter((g) => g.status === 'completed');
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
@@ -132,34 +132,43 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Matches */}
+        {/* Your games */}
         <div className="lg:col-span-3">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">Your matches</h2>
-            <Link to="/matches" className="text-sm font-medium text-brandred-400 hover:text-brandred-300">All fixtures</Link>
+            <h2 className="text-lg font-semibold text-white">Your games</h2>
+            <Link to="/matches" className="text-sm font-medium text-brandred-400 hover:text-brandred-300">All games</Link>
           </div>
 
-          {upcoming.length > 0 && (
+          {liveGames.length > 0 && (
+            <>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brandred-400">Live now — it's on!</h3>
+              <div className="mb-6 grid gap-4 sm:grid-cols-2">
+                {liveGames.map((g) => <GameCard key={g.id} game={g} teams={teams} players={players} canPlay />)}
+              </div>
+            </>
+          )}
+
+          {upcomingGames.length > 0 && (
             <>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Upcoming</h3>
               <div className="mb-6 grid gap-4 sm:grid-cols-2">
-                {upcoming.map((m) => <MatchCard key={m.id} match={m} teams={teams} highlightTeamId={team.id} />)}
+                {upcomingGames.map((g) => <GameCard key={g.id} game={g} teams={teams} players={players} canPlay />)}
               </div>
             </>
           )}
 
-          {previous.length > 0 && (
+          {pastGames.length > 0 && (
             <>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Previous</h3>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Played</h3>
               <div className="grid gap-4 sm:grid-cols-2">
-                {previous.map((m) => <MatchCard key={m.id} match={m} teams={teams} highlightTeamId={team.id} />)}
+                {pastGames.map((g) => <GameCard key={g.id} game={g} teams={teams} players={players} />)}
               </div>
             </>
           )}
 
-          {teamMatches.length === 0 && (
+          {myGames.length === 0 && (
             <Card className="p-8 text-center text-sm text-gray-400">
-              No matches scheduled for your team yet. Fixtures appear once organizers generate the round.
+              No games yet. Your boards appear here once organizers pair you — then just hit Play.
             </Card>
           )}
         </div>

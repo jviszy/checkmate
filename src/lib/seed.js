@@ -1,18 +1,39 @@
-// Demo data used by the local (offline) data layer so the whole app is
-// reviewable without a deployed backend. When Amplify is wired up this seed
-// is ignored — see src/lib/api.js.
+// Data seeds.
+//
+// The site defaults to an EMPTY, pre-launch state (no teams/players/matches/
+// games) so the live site is clean until real students register. Organizers can
+// load the sample set below from the admin panel for testing/demos.
+
+export const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 export const SEED_TOURNAMENT = {
   id: 'main',
   name: 'Checkmate 2026',
   currentRound: 1,
   advanceCount: 6,
-  status: 'in-progress',
+  status: 'registration',
 };
 
-// Helper to build a team + its players quickly.
+// The only account that always exists is the organizer.
+export const SEED_USERS = [
+  { email: 'admin@coderina.org', password: 'admin123', displayName: 'Coderina Admin', role: 'admin', playerId: null, teamId: null, coachId: null },
+];
+
+/** A fresh, empty competition — the default state. */
+export function emptyDb() {
+  return {
+    teams: [],
+    players: [],
+    matches: [],
+    games: [],
+    tournament: { ...SEED_TOURNAMENT },
+    users: SEED_USERS.map((u) => ({ ...u })),
+  };
+}
+
+// ── Sample data (loaded on demand from the admin panel) ─────────────────────
 let pid = 0;
-function team(id, name, players) {
+function team(id, name, coachId, players) {
   const members = players.map(([displayName, score, isCaptain]) => ({
     id: `p${++pid}`,
     teamId: id,
@@ -22,89 +43,52 @@ function team(id, name, players) {
     isCaptain: !!isCaptain,
   }));
   return {
-    team: {
-      id,
-      name,
-      status: 'active',
-      round: 1,
-      joinCode: id.toUpperCase() + '24',
-      logoUrl: '',
-      createdAt: '2026-06-01T09:00:00.000Z',
-    },
+    team: { id, name, status: 'active', round: 1, joinCode: id.toUpperCase().slice(0, 6) + '24', logoUrl: '', coachId, createdAt: '2026-06-01T09:00:00.000Z' },
     players: members,
   };
 }
 
 const RAW = [
-  team('knights', 'Royal Knights', [
-    ['Ada Okeke', 8.5, true], ['Tunde Bello', 7], ['Ngozi Eze', 6.5], ['Sami Yusuf', 5],
-  ]),
-  team('rooks', 'Iron Rooks', [
-    ['Chidi Obi', 7, true], ['Fatima Sani', 8], ['Emeka Nwosu', 6], ['Lola Adeyemi', 4.5],
-  ]),
-  team('bishops', 'Diagonal Bishops', [
-    ['Kemi Ade', 6, true], ['John Paul', 5.5], ['Zainab Musa', 7.5], ['Peter Eze', 5],
-  ]),
-  team('pawnstorm', 'Pawn Storm', [
-    ['Ibrahim Sule', 5, true], ['Grace Udo', 6], ['Daniel Oji', 4], ['Aisha Bello', 6.5],
-  ]),
-  team('queens', 'Queen Gambit', [
-    ['Nneka Ali', 9, true], ['Yusuf Garba', 7.5], ['Bisi Alabi', 6], ['Tariq Bala', 5.5],
-  ]),
-  team('castle', 'Castle Guard', [
-    ['Mary Joseph', 4, true], ['Femi Cole', 5], ['Hauwa Idris', 4.5], ['Obi Kalu', 3.5],
-  ]),
-  team('endgame', 'Endgame Masters', [
-    ['Sade Lawal', 6, true], ['Musa Tanko', 5], ['Rita Effiong', 5.5], ['Ken Uche', 4],
-  ]),
-  team('checkers', 'The Checkmates', [
-    ['Joy Ekwueme', 7, true], ['Hassan Abu', 6.5], ['Tope Ojo', 5], ['Ada Bright', 6],
-  ]),
-  team('opening', 'Opening Theory', [
-    ['Bola Tinu', 3, true], ['Kunle Aro', 4], ['Esther Pius', 3.5], ['Sani Dauda', 2.5],
-  ]),
-  team('zugzwang', 'Zugzwang FC', [
-    ['Chioma Eze', 5.5, true], ['Ali Mohammed', 4], ['Faith Okon', 5], ['Dele Smith', 4.5],
-  ]),
+  team('knights', 'Royal Knights', 'coach1', [['Ada Okeke', 0, true], ['Tunde Bello', 0], ['Ngozi Eze', 0], ['Sami Yusuf', 0]]),
+  team('rooks', 'Iron Rooks', 'coach1', [['Chidi Obi', 0, true], ['Fatima Sani', 0], ['Emeka Nwosu', 0], ['Lola Adeyemi', 0]]),
+  team('bishops', 'Diagonal Bishops', 'coach1', [['Kemi Ade', 0, true], ['John Paul', 0], ['Zainab Musa', 0], ['Peter Eze', 0]]),
+  team('queens', 'Queen Gambit', null, [['Nneka Ali', 0, true], ['Yusuf Garba', 0], ['Bisi Alabi', 0], ['Tariq Bala', 0]]),
+  team('castle', 'Castle Guard', null, [['Mary Joseph', 0, true], ['Femi Cole', 0], ['Hauwa Idris', 0], ['Obi Kalu', 0]]),
+  team('opening', 'Opening Theory', null, [['Bola Tinu', 0, true], ['Kunle Aro', 0], ['Esther Pius', 0], ['Sani Dauda', 0]]),
 ];
 
-export const SEED_TEAMS = RAW.map((r) => r.team);
-export const SEED_PLAYERS = RAW.flatMap((r) => r.players);
+export const SAMPLE_TEAMS = RAW.map((r) => r.team);
+export const SAMPLE_PLAYERS = RAW.flatMap((r) => r.players);
 
-// A pending registration awaiting admin approval (demonstrates the approval flow).
-SEED_TEAMS.push({
-  id: 'newcomers',
-  name: 'Rising Pawns',
-  status: 'pending',
-  round: 1,
-  joinCode: 'NEWCOMERS24',
-  logoUrl: '',
-  createdAt: '2026-06-20T14:30:00.000Z',
-});
-SEED_PLAYERS.push({
-  id: 'p99',
-  teamId: 'newcomers',
-  displayName: 'Victor Hart',
-  email: 'victor@example.com',
-  individualScore: 0,
-  isCaptain: true,
-});
+// One pending registration to demo the approval flow.
+SAMPLE_TEAMS.push({ id: 'newcomers', name: 'Rising Pawns', status: 'pending', round: 1, joinCode: 'RISING24', logoUrl: '', coachId: null, createdAt: '2026-06-20T14:30:00.000Z' });
+SAMPLE_PLAYERS.push({ id: 'p101', teamId: 'newcomers', displayName: 'Victor Hart', email: 'victor@example.com', individualScore: 0, isCaptain: true });
 
-// Round 1 fixtures — all upcoming. The competition hasn't started yet, so the
-// public leaderboard stays hidden until an organizer completes the first match.
-export const SEED_MATCHES = [
+// Team fixtures (round robin subset).
+export const SAMPLE_MATCHES = [
   { id: 'm1', round: 1, teamAId: 'knights', teamBId: 'castle', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-05T10:00:00.000Z', status: 'scheduled' },
   { id: 'm2', round: 1, teamAId: 'queens', teamBId: 'opening', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-05T12:00:00.000Z', status: 'scheduled' },
-  { id: 'm3', round: 1, teamAId: 'rooks', teamBId: 'zugzwang', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-06T10:00:00.000Z', status: 'scheduled' },
-  { id: 'm4', round: 1, teamAId: 'bishops', teamBId: 'endgame', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-06T12:00:00.000Z', status: 'scheduled' },
-  { id: 'm5', round: 1, teamAId: 'checkers', teamBId: 'pawnstorm', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-07T10:00:00.000Z', status: 'scheduled' },
-  { id: 'm6', round: 1, teamAId: 'knights', teamBId: 'queens', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-07T12:00:00.000Z', status: 'scheduled' },
-  { id: 'm7', round: 1, teamAId: 'rooks', teamBId: 'bishops', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-08T10:00:00.000Z', status: 'scheduled' },
+  { id: 'm3', round: 1, teamAId: 'rooks', teamBId: 'bishops', scoreA: 0, scoreB: 0, scheduledAt: '2026-07-06T10:00:00.000Z', status: 'scheduled' },
 ];
 
-// Demo accounts for the mock auth provider. Passwords are obviously not secure —
-// real auth comes from Cognito once the Amplify backend is deployed.
-export const SEED_USERS = [
-  { email: 'admin@coderina.org', password: 'admin123', displayName: 'Coderina Admin', isAdmin: true, playerId: null, teamId: null },
-  { email: 'adaokeke@example.com', password: 'player123', displayName: 'Ada Okeke', isAdmin: false, playerId: 'p1', teamId: 'knights' },
+// Individual playable board games (the scored unit).
+export const SAMPLE_GAMES = [
+  { id: 'game1', matchId: 'm1', round: 1, whiteTeamId: 'knights', whitePlayerId: 'p1', blackTeamId: 'castle', blackPlayerId: 'p17', fen: INITIAL_FEN, pgn: '', status: 'live', result: null, winnerTeamId: null, startedAt: '2026-07-05T10:00:00.000Z', endedAt: null, createdAt: '2026-07-05T09:50:00.000Z' },
+  { id: 'game2', matchId: 'm2', round: 1, whiteTeamId: 'queens', whitePlayerId: 'p13', blackTeamId: 'opening', blackPlayerId: 'p21', fen: INITIAL_FEN, pgn: '', status: 'scheduled', result: null, winnerTeamId: null, startedAt: null, endedAt: null, createdAt: '2026-07-05T09:50:00.000Z' },
 ];
+
+export const SAMPLE_USERS = [
+  { email: 'coach@coderina.org', password: 'coach123', displayName: 'Coach Emeka', role: 'coach', playerId: null, teamId: null, coachId: 'coach1' },
+  { email: 'adaokeke@example.com', password: 'player123', displayName: 'Ada Okeke', role: 'player', playerId: 'p1', teamId: 'knights' },
+];
+
+export function sampleDb() {
+  return {
+    teams: SAMPLE_TEAMS.map((t) => ({ ...t })),
+    players: SAMPLE_PLAYERS.map((p) => ({ ...p })),
+    matches: SAMPLE_MATCHES.map((m) => ({ ...m })),
+    games: SAMPLE_GAMES.map((g) => ({ ...g })),
+    tournament: { ...SEED_TOURNAMENT, status: 'in-progress' },
+    users: [...SEED_USERS.map((u) => ({ ...u })), ...SAMPLE_USERS.map((u) => ({ ...u }))],
+  };
+}

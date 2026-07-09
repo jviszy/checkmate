@@ -55,7 +55,7 @@ const steps = [
 ];
 
 export default function Landing() {
-  const { teams, players, matches, leaderboard, leaderboardLive, tournament } = useCheckmate();
+  const { teams, players, matches, leaderboard, leaderboardLive, hasTeams, tournament } = useCheckmate();
 
   const advanceCount = tournament?.advanceCount ?? 6;
   const topTeams = leaderboard.slice(0, 5);
@@ -212,49 +212,41 @@ export default function Landing() {
         </Card>
       </section>
 
-      {/* Leaderboard (once live) + upcoming snapshot */}
-      <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
-        <div className={`grid gap-10 ${leaderboardLive ? 'lg:grid-cols-5' : 'lg:grid-cols-2'}`}>
-          <div className={leaderboardLive ? 'lg:col-span-3' : ''}>
-            <div className="mb-5 flex items-end justify-between">
-              <SectionTitle eyebrow="Standings" title={leaderboardLive ? 'Top of the board' : 'Standings'} />
-              {leaderboardLive && (
-                <Link to="/leaderboard" className="inline-flex items-center gap-1 text-sm font-medium text-brandred-400 hover:text-brandred-300">
-                  Full leaderboard <ArrowRight className="h-4 w-4" />
-                </Link>
-              )}
-            </div>
-            {leaderboardLive ? (
-              <LeaderboardTable rows={topTeams} advanceCount={advanceCount} compact />
-            ) : (
-              <Card className="flex h-full flex-col items-center justify-center gap-3 bg-board-grid p-10 text-center">
-                <Trophy className="h-9 w-9 text-brandred-400" />
-                <h3 className="text-lg font-semibold text-white">The leaderboard goes live after the first match</h3>
-                <p className="max-w-sm text-sm text-gray-400">
-                  Teams are registering now. Once round one’s first game is played, standings appear
-                  here automatically — and the top {advanceCount} race begins.
-                </p>
-              </Card>
+      {/* Standings + schedule — only once registration has started; standings
+          appear automatically once matches go live. Hidden pre-launch. */}
+      {hasTeams && (
+        <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+          <div className={`grid gap-10 ${leaderboardLive ? 'lg:grid-cols-5' : 'lg:grid-cols-1'}`}>
+            {leaderboardLive && (
+              <div className="lg:col-span-3">
+                <div className="mb-5 flex items-end justify-between">
+                  <SectionTitle eyebrow="Standings" title="Top of the board" />
+                  <Link to="/leaderboard" className="inline-flex items-center gap-1 text-sm font-medium text-brandred-400 hover:text-brandred-300">
+                    Full leaderboard <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+                <LeaderboardTable rows={topTeams} advanceCount={advanceCount} compact />
+              </div>
             )}
-          </div>
 
-          <div className={leaderboardLive ? 'lg:col-span-2' : ''}>
-            <div className="mb-5 flex items-end justify-between">
-              <SectionTitle eyebrow="Schedule" title="Next matches" />
-              <Link to="/matches" className="inline-flex items-center gap-1 text-sm font-medium text-brandred-400 hover:text-brandred-300">
-                All matches <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-            <div className="space-y-4">
-              {upcoming.length ? (
-                upcoming.map((m) => <MatchCard key={m.id} match={m} teams={teams} />)
-              ) : (
-                <Card className="p-6 text-center text-sm text-gray-400">No upcoming matches scheduled.</Card>
-              )}
+            <div className={leaderboardLive ? 'lg:col-span-2' : ''}>
+              <div className="mb-5 flex items-end justify-between">
+                <SectionTitle eyebrow="Schedule" title="Next matches" />
+                <Link to="/matches" className="inline-flex items-center gap-1 text-sm font-medium text-brandred-400 hover:text-brandred-300">
+                  All matches <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+              <div className={`grid gap-4 ${leaderboardLive ? '' : 'sm:grid-cols-2 lg:grid-cols-3'}`}>
+                {upcoming.length ? (
+                  upcoming.map((m) => <MatchCard key={m.id} match={m} teams={teams} />)
+                ) : (
+                  <Card className="p-6 text-center text-sm text-gray-400">No upcoming matches scheduled yet.</Card>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* CTA */}
       <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6">
