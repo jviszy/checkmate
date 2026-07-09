@@ -9,10 +9,12 @@ import { KingGlyph, FullLogo } from '../components/Logo.jsx';
 import LeaderboardTable from '../components/LeaderboardTable.jsx';
 import MatchCard from '../components/MatchCard.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
-import kidsPhoto from '../assets/photo-kids.jpg';
-import champGirl from '../assets/photo-champ-girl.jpg';
-import champBoy from '../assets/photo-champ-boy.jpg';
-import glassPhoto from '../assets/photo-glass.jpg';
+import heroPhoto from '../assets/photos/hero.jpg';
+import boardPhoto from '../assets/photos/board.jpg';
+import g1 from '../assets/photos/g1.jpg';
+import g2 from '../assets/photos/g2.jpg';
+import g3 from '../assets/photos/g3.jpg';
+import g4 from '../assets/photos/g4.jpg';
 
 /** Photo tile with a gradient scrim and caption, used in the impact gallery. */
 function GalleryImg({ src, caption, className = '' }) {
@@ -78,7 +80,7 @@ export default function Landing() {
       <section className="relative overflow-hidden bg-board-grid">
         {/* Photographic backdrop with a dark scrim so text stays readable */}
         <div className="absolute inset-0">
-          <img src={kidsPhoto} alt="" aria-hidden="true" className="h-full w-full object-cover object-center opacity-25" />
+          <img src={heroPhoto} alt="" aria-hidden="true" className="h-full w-full object-cover object-center opacity-30" />
           <div className="absolute inset-0 bg-gradient-to-b from-board-950/80 via-board-950/92 to-board-950" />
           <div className="absolute inset-0 bg-gradient-to-r from-board-950/70 via-transparent to-board-950/70" />
         </div>
@@ -158,10 +160,11 @@ export default function Landing() {
           subtitle="Chess builds strategy, resilience, and confidence — one move at a time."
           className="mb-10"
         />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2">
-          <GalleryImg src={kidsPhoto} caption="One move can shape a mind" className="sm:col-span-2 lg:col-span-2 lg:row-span-2 min-h-[280px]" />
-          <GalleryImg src={champGirl} caption="Anyone can be a winner" className="min-h-[240px]" />
-          <GalleryImg src={champBoy} caption="Win with your mind, not just your hands" className="min-h-[240px]" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:grid-rows-2">
+          <GalleryImg src={g2} caption="Focus, strategy, resilience" className="sm:col-span-2 lg:col-span-2 lg:row-span-2 min-h-[280px]" />
+          <GalleryImg src={g1} caption="Every move sharpens the mind" className="min-h-[200px]" />
+          <GalleryImg src={g3} caption="One board, countless lessons" className="min-h-[200px]" />
+          <GalleryImg src={g4} caption="Big thinkers start with small moves" className="sm:col-span-2 min-h-[200px]" />
         </div>
       </section>
 
@@ -256,7 +259,7 @@ export default function Landing() {
       {/* CTA */}
       <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6">
         <div className="relative overflow-hidden rounded-2xl border border-white/10">
-          <img src={glassPhoto} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover object-center opacity-30" />
+          <img src={boardPhoto} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover object-center opacity-35" />
           <div className="absolute inset-0 bg-gradient-to-r from-board-950 via-board-950/85 to-brandred-700/40" />
           <div className="relative flex flex-col items-center gap-6 p-12 text-center">
             <KingGlyph className="h-12 w-12" />
