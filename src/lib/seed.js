@@ -60,8 +60,7 @@ const RAW = [
 export const SAMPLE_TEAMS = RAW.map((r) => r.team);
 export const SAMPLE_PLAYERS = RAW.flatMap((r) => r.players);
 
-// One pending registration to demo the approval flow.
-SAMPLE_TEAMS.push({ id: 'newcomers', name: 'Rising Pawns', status: 'pending', round: 1, joinCode: 'RISING24', logoUrl: '', coachId: null, createdAt: '2026-06-20T14:30:00.000Z' });
+SAMPLE_TEAMS.push({ id: 'newcomers', name: 'Rising Pawns', status: 'active', round: 1, joinCode: 'RISING24', logoUrl: '', coachId: null, createdAt: '2026-06-20T14:30:00.000Z' });
 SAMPLE_PLAYERS.push({ id: 'p101', teamId: 'newcomers', displayName: 'Victor Hart', email: 'victor@example.com', individualScore: 0, isCaptain: true });
 
 // Team fixtures (round robin subset).

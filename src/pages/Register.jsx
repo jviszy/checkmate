@@ -57,8 +57,8 @@ export default function Register() {
         {done.kind === 'captain' ? (
           <>
             <p className="mt-3 text-gray-300">
-              Team <span className="font-semibold text-brandred-400">{done.teamName}</span> has been
-              submitted and is now <span className="text-brandred-400">pending organizer approval</span>.
+              Team <span className="font-semibold text-brandred-400">{done.teamName}</span> is
+              <span className="text-brandred-400"> live</span> and ready to play.
             </p>
             <Card className="mx-auto mt-6 max-w-xs p-5">
               <p className="text-sm text-gray-400">Share this join code with your teammates:</p>
@@ -68,7 +68,7 @@ export default function Register() {
         ) : done.kind === 'member' ? (
           <p className="mt-3 text-gray-300">
             You've joined <span className="font-semibold text-brandred-400">{done.teamName}</span>.
-            Your team is active once organizers approve it.
+            You're all set — head to your dashboard.
           </p>
         ) : (
           <p className="mt-3 text-gray-300">
@@ -136,7 +136,7 @@ export default function Register() {
 
       <p className="mt-4 text-center text-xs text-gray-500">
         {mode === 'captain'
-          ? 'As captain you’ll get a join code to invite teammates. New teams require organizer approval.'
+          ? 'As captain you’ll get a join code to invite teammates. Your team goes live right away.'
           : mode === 'member'
           ? 'Ask your team captain for the join code they received at registration.'
           : 'Coaches create and manage multiple teams from a single dashboard.'}

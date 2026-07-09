@@ -88,7 +88,7 @@ export const listTeamsByCoach = (coachId) => ok(db.teams.filter((t) => t.coachId
 export const getTeamByJoinCode = (code) =>
   ok(db.teams.find((t) => t.joinCode?.toUpperCase() === String(code).toUpperCase()) || null);
 
-export function createTeam({ name, logoUrl = '', coachId = null, status = 'pending' }) {
+export function createTeam({ name, logoUrl = '', coachId = null, status = 'active' }) {
   const team = {
     id: uid('team'), name, logoUrl, status, coachId,
     round: db.tournament.currentRound,

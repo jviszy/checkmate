@@ -19,7 +19,7 @@ export default function Coach() {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
-    await createTeam({ name: name.trim(), coachId: user.coachId, status: 'pending' });
+    await createTeam({ name: name.trim(), coachId: user.coachId, status: 'active' });
     setName('');
     setBusy(false);
   };
@@ -57,7 +57,7 @@ export default function Coach() {
             <Plus className="h-4 w-4" /> {busy ? 'Adding…' : 'Add team'}
           </Button>
         </form>
-        <p className="mt-2 text-xs text-gray-500">New teams are submitted for organizer approval, then get a join code for players.</p>
+        <p className="mt-2 text-xs text-gray-500">Teams go live right away and get a join code to share with players.</p>
       </Card>
 
       {/* Teams */}

@@ -1,21 +1,17 @@
 import { useState, useMemo } from 'react';
-import {
-  CheckCircle2, XCircle, Trash2, Swords, Settings, Users, Flag, RefreshCw, Save,
-} from 'lucide-react';
+import { Trash2, Swords, Settings, Users, Flag, RefreshCw, Save, Play } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card, Button, StatusPill, TeamMark } from '../components/ui.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
 import {
-  approveTeam, rejectTeam, deleteTeam, updatePlayer, createMatches, updateMatch,
+  deleteTeam, updatePlayer, createMatches,
   deleteMatchesForRound, updateTournament, updateTeam, loadSampleData, clearData,
   createGame, completeGame,
 } from '../lib/api.js';
-import { Link } from 'react-router-dom';
-import { Play } from 'lucide-react';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
-import { fmtScore, fmtDate, teamName } from '../lib/format.js';
+import { fmtScore, teamName } from '../lib/format.js';
 
 const TABS = [
-  { id: 'approvals', label: 'Approvals', icon: Flag },
   { id: 'scores', label: 'Teams & Scores', icon: Users },
   { id: 'matches', label: 'Matches', icon: Swords },
   { id: 'round', label: 'Round Control', icon: Settings },
@@ -23,9 +19,7 @@ const TABS = [
 
 export default function Admin() {
   const { teams, players, matches, games, leaderboard, tournament } = useCheckmate();
-  const [tab, setTab] = useState('approvals');
-
-  const pending = teams.filter((t) => t.status === 'pending');
+  const [tab, setTab] = useState('scores');
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
@@ -57,14 +51,10 @@ export default function Admin() {
             }`}
           >
             <t.icon className="h-4 w-4" /> {t.label}
-            {t.id === 'approvals' && pending.length > 0 && (
-              <span className="rounded-full bg-brandred-500 px-1.5 text-xs text-white">{pending.length}</span>
-            )}
           </button>
         ))}
       </div>
 
-      {tab === 'approvals' && <Approvals pending={pending} players={players} />}
       {tab === 'scores' && <Scores teams={teams} players={players} leaderboard={leaderboard} />}
       {tab === 'matches' && <MatchesAdmin teams={teams} players={players} matches={matches} games={games} tournament={tournament} />}
       {tab === 'round' && <RoundControl teams={teams} leaderboard={leaderboard} tournament={tournament} />}
@@ -72,48 +62,10 @@ export default function Admin() {
   );
 }
 
-/* ── Approvals ─────────────────────────────────────────────────────────── */
-function Approvals({ pending, players }) {
-  if (!pending.length) {
-    return <Card className="p-10 text-center text-gray-400">No teams awaiting approval. 🎉</Card>;
-  }
-  return (
-    <div className="space-y-4">
-      {pending.map((t) => {
-        const roster = players.filter((p) => p.teamId === t.id);
-        return (
-          <Card key={t.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-4">
-              <TeamMark name={t.name} logoUrl={t.logoUrl} size={48} />
-              <div>
-                <div className="font-medium text-white">{t.name}</div>
-                <div className="text-sm text-gray-400">
-                  {roster.length} player{roster.length !== 1 ? 's' : ''} · Registered {fmtDate(t.createdAt)}
-                </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  {roster.map((p) => p.displayName).join(', ') || 'No players yet'}
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="success" size="sm" onClick={() => approveTeam(t.id)}>
-                <CheckCircle2 className="h-4 w-4" /> Approve
-              </Button>
-              <Button variant="danger" size="sm" onClick={() => { if (confirm(`Reject and delete "${t.name}"?`)) rejectTeam(t.id); }}>
-                <XCircle className="h-4 w-4" /> Reject
-              </Button>
-            </div>
-          </Card>
-        );
-      })}
-    </div>
-  );
-}
-
 /* ── Teams & Scores ────────────────────────────────────────────────────── */
 function Scores({ teams, players, leaderboard }) {
-  const active = teams.filter((t) => t.status !== 'pending');
-  if (!active.length) return <Card className="p-10 text-center text-gray-400">No approved teams yet.</Card>;
+  const active = teams;
+  if (!active.length) return <Card className="p-10 text-center text-gray-400">No teams yet. Teams appear here as they register.</Card>;
 
   return (
     <div className="space-y-5">
