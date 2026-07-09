@@ -170,12 +170,20 @@ export function deleteMatchesForRound(round) {
 export const listGames = () => ok(db.games);
 export const getGame = (id) => ok(db.games.find((g) => g.id === id) || null);
 
-export function createGame({ matchId = null, round = 1, whiteTeamId, whitePlayerId, blackTeamId, blackPlayerId }) {
+// Default time control: 10 minutes each with a 3-second increment per move.
+export const DEFAULT_CLOCK_MS = 10 * 60 * 1000;
+export const DEFAULT_INCREMENT_MS = 3 * 1000;
+
+export function createGame({
+  matchId = null, round = 1, whiteTeamId, whitePlayerId, blackTeamId, blackPlayerId,
+  clockMs = DEFAULT_CLOCK_MS, incrementMs = DEFAULT_INCREMENT_MS,
+}) {
   const game = {
     id: uid('game'), matchId, round,
     whiteTeamId, whitePlayerId, blackTeamId, blackPlayerId,
     fen: INITIAL_FEN, pgn: '', status: 'scheduled',
     result: null, winnerTeamId: null,
+    clockMs, incrementMs, whiteMs: clockMs, blackMs: clockMs, lastMoveAt: null,
     startedAt: null, endedAt: null, createdAt: new Date().toISOString(),
   };
   db.games = [...db.games, game];
@@ -183,11 +191,14 @@ export function createGame({ matchId = null, round = 1, whiteTeamId, whitePlayer
   return ok(game);
 }
 
-/** Persist a move (fen + pgn). Flips a scheduled game to live on first move. */
-export function updateGame(id, { fen, pgn, status }) {
+/** Persist a move (fen + pgn + clocks). Flips a scheduled game to live. */
+export function updateGame(id, { fen, pgn, status, whiteMs, blackMs, lastMoveAt }) {
   db.games = db.games.map((g) => {
     if (g.id !== id) return g;
     const next = { ...g, fen, pgn };
+    if (whiteMs !== undefined) next.whiteMs = whiteMs;
+    if (blackMs !== undefined) next.blackMs = blackMs;
+    if (lastMoveAt !== undefined) next.lastMoveAt = lastMoveAt;
     if (status) next.status = status;
     else if (g.status === 'scheduled') next.status = 'live';
     if (next.status === 'live' && !g.startedAt) next.startedAt = new Date().toISOString();

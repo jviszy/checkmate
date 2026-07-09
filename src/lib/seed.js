@@ -71,9 +71,10 @@ export const SAMPLE_MATCHES = [
 ];
 
 // Individual playable board games (the scored unit).
+const CLOCK = { clockMs: 600000, incrementMs: 3000, whiteMs: 600000, blackMs: 600000, lastMoveAt: null };
 export const SAMPLE_GAMES = [
-  { id: 'game1', matchId: 'm1', round: 1, whiteTeamId: 'knights', whitePlayerId: 'p1', blackTeamId: 'castle', blackPlayerId: 'p17', fen: INITIAL_FEN, pgn: '', status: 'live', result: null, winnerTeamId: null, startedAt: '2026-07-05T10:00:00.000Z', endedAt: null, createdAt: '2026-07-05T09:50:00.000Z' },
-  { id: 'game2', matchId: 'm2', round: 1, whiteTeamId: 'queens', whitePlayerId: 'p13', blackTeamId: 'opening', blackPlayerId: 'p21', fen: INITIAL_FEN, pgn: '', status: 'scheduled', result: null, winnerTeamId: null, startedAt: null, endedAt: null, createdAt: '2026-07-05T09:50:00.000Z' },
+  { id: 'game1', matchId: 'm1', round: 1, whiteTeamId: 'knights', whitePlayerId: 'p1', blackTeamId: 'castle', blackPlayerId: 'p17', fen: INITIAL_FEN, pgn: '', status: 'live', result: null, winnerTeamId: null, ...CLOCK, startedAt: '2026-07-05T10:00:00.000Z', endedAt: null, createdAt: '2026-07-05T09:50:00.000Z' },
+  { id: 'game2', matchId: 'm2', round: 1, whiteTeamId: 'queens', whitePlayerId: 'p13', blackTeamId: 'opening', blackPlayerId: 'p21', fen: INITIAL_FEN, pgn: '', status: 'scheduled', result: null, winnerTeamId: null, ...CLOCK, startedAt: null, endedAt: null, createdAt: '2026-07-05T09:50:00.000Z' },
 ];
 
 export const SAMPLE_USERS = [
