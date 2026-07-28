@@ -11,7 +11,7 @@ import { fmtScore } from '../lib/format.js';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { teams, players, games, leaderboard, tournament } = useCheckmate();
+  const { teams, players, games, leaderboard, winnersPerZone, tournament } = useCheckmate();
 
   const team = teams.find((t) => t.id === user?.teamId);
   const row = leaderboard.find((r) => r.id === user?.teamId);
@@ -37,9 +37,9 @@ export default function Dashboard() {
     );
   }
 
-  const advanceCount = tournament?.advanceCount ?? 6;
   const total = row?.total ?? 0;
-  const rank = row?.rank ?? '—';
+  const zoneRank = row?.zoneRank ?? '—';
+  const zone = row?.zone ?? '—';
   const advancing = row?.advancing;
   const liveGames = myGames.filter((g) => g.status === 'live');
   const upcomingGames = myGames.filter((g) => g.status === 'scheduled');
@@ -57,20 +57,15 @@ export default function Dashboard() {
               <StatusPill status={team.status} />
             </div>
             <p className="mt-1 text-sm text-gray-400">
-              Welcome back, {user.displayName}. Round {tournament?.currentRound ?? 1}.
+              Welcome back, {user.displayName}. {team.state || '—'} · {zone} zone · Round {tournament?.currentRound ?? 1}.
             </p>
           </div>
         </div>
-        {team.status === 'pending' && (
-          <div className="rounded-lg bg-brandred-500/10 px-4 py-2 text-sm text-brandred-300">
-            Awaiting organizer approval
-          </div>
-        )}
       </div>
 
       {/* Stat cards */}
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat icon={Hash} label="Current rank" value={rank === '—' ? '—' : `#${rank}`} />
+        <Stat icon={Hash} label="Zone rank" value={zoneRank === '—' ? '—' : `#${zoneRank}`} />
         <Stat icon={TrendingUp} label="Team score" value={fmtScore(total)} />
         <Stat icon={Users} label="Players" value={roster.length} />
         <Stat
@@ -81,10 +76,10 @@ export default function Dashboard() {
         />
       </div>
 
-      {!advancing && rank !== '—' && team.status !== 'pending' && (
+      {!advancing && zoneRank !== '—' && (
         <Card className="mt-4 p-4 text-sm text-gray-300">
-          You're <span className="font-semibold text-white">#{rank}</span>. The top {advanceCount} teams
-          advance — keep stacking points to break into the cut.
+          You're <span className="font-semibold text-white">#{zoneRank}</span> in the {zone} zone. The top
+          {' '}{winnersPerZone} advance{winnersPerZone === 1 ? 's' : ''} — keep stacking points to take your zone.
         </Card>
       )}
 

@@ -30,3 +30,6 @@ amplifyconfiguration.json
 *.njsproj
 *.sln
 *.sw?
+
+# AWS credential exports — never commit
+*.csv

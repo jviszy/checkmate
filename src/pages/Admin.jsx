@@ -80,8 +80,22 @@ function Scores({ teams, players, leaderboard }) {
             <div className="flex items-center justify-between border-b border-white/10 bg-board-900/50 px-5 py-3">
               <div className="flex items-center gap-3">
                 <TeamMark name={t.name} logoUrl={t.logoUrl} size={36} />
-                <span className="font-medium text-white">{t.name}</span>
-                <StatusPill status={t.status} />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-white">{t.name}</span>
+                    <StatusPill status={t.status} />
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-500">
+                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-brandred-300">{zoneOfTeam(t)}</span>
+                    <select
+                      value={t.state || ''} onChange={(e) => updateTeam(t.id, { state: e.target.value })}
+                      className="rounded border border-white/10 bg-board-900 px-1.5 py-0.5 text-gray-300 outline-none focus:border-brandred-500"
+                    >
+                      <option value="">Set state…</option>
+                      {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
               </div>
               <div className="flex items-center gap-4">
                 <span className="text-sm text-gray-400">Total <span className="font-mono text-base font-bold text-brandred-400">{fmtScore(total)}</span></span>
@@ -133,19 +147,29 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
   const activeIds = activeTeams.map((t) => t.id);
   const roundGames = useMemo(() => games.filter((g) => g.round === round), [games, round]);
 
-  // Generate round-robin fixtures AND a playable board (captain vs captain) per match.
+  // Group active teams by geopolitical zone; teams only play within their zone.
+  const zoneGroups = useMemo(() => {
+    const g = {};
+    for (const t of activeTeams) (g[zoneOfTeam(t)] ||= []).push(t);
+    return g;
+  }, [activeTeams]);
+  const playableZones = Object.entries(zoneGroups).filter(([, ts]) => ts.length >= 2);
+
+  // Generate a round-robin WITHIN each zone, plus a playable board (captains) per fixture.
   const generate = async () => {
-    if (activeIds.length < 2) return alert('Need at least 2 active teams to generate fixtures.');
+    if (!playableZones.length) return alert('Each zone needs at least 2 teams. Add more teams (or states) first.');
     const existing = matches.filter((m) => m.round === round);
     if (existing.length && !confirm(`Replace round ${round}'s ${existing.length} fixture(s) and their games?`)) return;
     await deleteMatchesForRound(round);
-    const recs = generateMatches(format, activeIds, round);
-    const created = await createMatches(recs);
-    for (const m of created) {
-      const wc = captainOf(players, m.teamAId);
-      const bc = captainOf(players, m.teamBId);
-      if (wc && bc) {
-        await createGame({ matchId: m.id, round, whiteTeamId: m.teamAId, whitePlayerId: wc.id, blackTeamId: m.teamBId, blackPlayerId: bc.id });
+    for (const [, zoneTeams] of playableZones) {
+      const recs = generateMatches(format, zoneTeams.map((t) => t.id), round);
+      const created = await createMatches(recs);
+      for (const m of created) {
+        const wc = captainOf(players, m.teamAId);
+        const bc = captainOf(players, m.teamBId);
+        if (wc && bc) {
+          await createGame({ matchId: m.id, round, whiteTeamId: m.teamAId, whitePlayerId: wc.id, blackTeamId: m.teamBId, blackPlayerId: bc.id });
+        }
       }
     }
   };
@@ -155,7 +179,9 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
       <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 className="font-medium text-white">Generate fixtures · Round {round}</h3>
-          <p className="mt-1 text-sm text-gray-400">{activeIds.length} active teams. Each fixture gets a playable board (team captains); add more boards below.</p>
+          <p className="mt-1 text-sm text-gray-400">
+            {activeIds.length} active teams across {Object.keys(zoneGroups).length} zone(s); {playableZones.length} zone(s) have enough teams to play. Round-robin runs within each zone.
+          </p>
         </div>
         <div className="flex items-end gap-2">
           <label className="text-sm">
@@ -261,21 +287,26 @@ function GameRow({ game, teams, players }) {
 /* ── Round control ─────────────────────────────────────────────────────── */
 function RoundControl({ teams, leaderboard, tournament }) {
   const [name, setName] = useState(tournament?.name ?? '');
-  const [advanceCount, setAdvanceCount] = useState(tournament?.advanceCount ?? 6);
+  const [winnersPerZone, setWinnersPerZone] = useState(tournament?.winnersPerZone ?? 1);
+
+  const zones = groupByZone(leaderboard);
+  const advancingRows = leaderboard.filter((r) => r.advancing);
+  const advancingIds = advancingRows.map((r) => r.id);
+  const totalAdv = totalAdvancing(leaderboard, tournament?.winnersPerZone ?? 1);
 
   const advance = async () => {
-    const cut = leaderboard.slice(0, advanceCount).map((r) => r.id);
-    if (!confirm(`Advance the top ${advanceCount} teams and eliminate the rest? This also moves to round ${(tournament.currentRound ?? 1) + 1}.`)) return;
+    if (!advancingIds.length) return alert('No standings yet — play some games first.');
+    if (!confirm(`Advance the top ${tournament?.winnersPerZone ?? 1} of each zone (${advancingIds.length} team(s)) and eliminate the rest? Moves to round ${(tournament.currentRound ?? 1) + 1}.`)) return;
     await Promise.all(
       leaderboard.map((r) =>
-        updateTeam(r.id, { status: cut.includes(r.id) ? 'advanced' : 'eliminated' })
+        updateTeam(r.id, { status: advancingIds.includes(r.id) ? 'advanced' : 'eliminated' })
       )
     );
     await updateTournament({ currentRound: (tournament.currentRound ?? 1) + 1 });
   };
 
   const saveConfig = () =>
-    updateTournament({ name, advanceCount: parseInt(advanceCount, 10) || 6 });
+    updateTournament({ name, winnersPerZone: parseInt(winnersPerZone, 10) || 1 });
 
   const eliminated = teams.filter((t) => t.status === 'eliminated');
 
@@ -289,29 +320,38 @@ function RoundControl({ teams, leaderboard, tournament }) {
             className="w-full rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500" />
         </label>
         <label className="mt-4 block text-sm">
-          <span className="mb-1 block text-gray-400">Teams that advance per round</span>
-          <input type="number" min="1" value={advanceCount} onChange={(e) => setAdvanceCount(e.target.value)}
+          <span className="mb-1 block text-gray-400">Winners that advance per zone</span>
+          <input type="number" min="1" value={winnersPerZone} onChange={(e) => setWinnersPerZone(e.target.value)}
             className="w-32 rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500" />
         </label>
+        <p className="mt-2 text-xs text-gray-500">
+          Total advancing = winners per zone × zones in play (currently {totalAdv} across {zones.length} zone(s)).
+        </p>
         <Button className="mt-5" onClick={saveConfig}><Save className="h-4 w-4" /> Save settings</Button>
       </Card>
 
       <Card className="p-6">
         <h3 className="font-medium text-white">Advance round</h3>
         <p className="mt-2 text-sm text-gray-400">
-          Promote the current top <span className="font-semibold text-brandred-400">{advanceCount}</span> teams to the
-          next round and eliminate the rest. The leaderboard carries over.
+          Promote the top <span className="font-semibold text-brandred-400">{tournament?.winnersPerZone ?? 1}</span> of
+          each zone and eliminate the rest.
         </p>
-        <div className="mt-4 space-y-1">
-          {leaderboard.slice(0, advanceCount).map((r) => (
-            <div key={r.id} className="flex items-center justify-between rounded-lg bg-brandred-500/[0.06] px-3 py-1.5 text-sm">
-              <span className="text-gray-200">#{r.rank} {r.name}</span>
-              <span className="font-mono text-brandred-400">{fmtScore(r.total)}</span>
+        <div className="mt-4 space-y-3">
+          {zones.map(({ zone, rows }) => (
+            <div key={zone}>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">{zone}</div>
+              {rows.filter((r) => r.advancing).map((r) => (
+                <div key={r.id} className="flex items-center justify-between rounded-lg bg-brandred-500/[0.06] px-3 py-1.5 text-sm">
+                  <span className="text-gray-200">#{r.zoneRank} {r.name}</span>
+                  <span className="font-mono text-brandred-400">{fmtScore(r.total)}</span>
+                </div>
+              ))}
             </div>
           ))}
+          {!zones.length && <p className="text-sm text-gray-500">No standings yet.</p>}
         </div>
         <Button variant="danger" className="mt-5" onClick={advance}>
-          <Flag className="h-4 w-4" /> Advance top {advanceCount} → Round {(tournament?.currentRound ?? 1) + 1}
+          <Flag className="h-4 w-4" /> Advance zone winners → Round {(tournament?.currentRound ?? 1) + 1}
         </Button>
         {eliminated.length > 0 && (
           <p className="mt-3 text-xs text-gray-500">{eliminated.length} team(s) eliminated so far.</p>

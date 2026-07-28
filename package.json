@@ -12,6 +12,7 @@
   "dependencies": {
     "@aws-amplify/ui-react": "^6.15.4",
     "aws-amplify": "^6.18.0",
+    "aws-cdk-lib": "^2.261.0",
     "chess.js": "^1.4.0",
     "framer-motion": "^12.42.0",
     "lucide-react": "^1.22.0",

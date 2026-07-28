@@ -9,6 +9,7 @@ import { KingGlyph, FullLogo } from '../components/Logo.jsx';
 import LeaderboardTable from '../components/LeaderboardTable.jsx';
 import MatchCard from '../components/MatchCard.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
+import { totalAdvancing } from '../lib/scoring.js';
 import heroPhoto from '../assets/photos/hero.jpg';
 import boardPhoto from '../assets/photos/board.jpg';
 import g1 from '../assets/photos/g1.jpg';
@@ -48,30 +49,31 @@ const fadeUp = {
 };
 
 const steps = [
-  { icon: Users, title: 'Register your team', text: 'Sign up your squad. The captain creates the team; teammates join with a code.' },
-  { icon: ShieldCheck, title: 'Get approved', text: 'Organizers review and approve registrations to keep the bracket clean.' },
-  { icon: CalendarClock, title: 'Play your matches', text: 'Fixtures are generated automatically. Track your next and previous games.' },
-  { icon: Crown, title: 'Top 6 advance', text: 'Every member’s score adds to the team total. The top 6 teams proceed.' },
+  { icon: Users, title: 'Register your team', text: 'Sign up your squad with your state. The captain creates the team; teammates join with a code.' },
+  { icon: ShieldCheck, title: 'Grouped by zone', text: 'Teams are sorted into their state’s geopolitical zone and play only within that zone.' },
+  { icon: CalendarClock, title: 'Play your games', text: 'Games are generated automatically and played live on the board, right here.' },
+  { icon: Crown, title: 'Zone winners advance', text: 'Every member’s score adds to the team total. The top team of each zone proceeds.' },
 ];
 
 export default function Landing() {
-  const { teams, players, matches, leaderboard, leaderboardLive, hasTeams, tournament } = useCheckmate();
+  const { teams, players, matches, games, leaderboard, leaderboardLive, hasTeams, winnersPerZone, tournament } = useCheckmate();
 
-  const advanceCount = tournament?.advanceCount ?? 6;
   const topTeams = leaderboard.slice(0, 5);
+  const advanceCount = winnersPerZone;
   const upcoming = matches
     .filter((m) => m.status !== 'completed')
     .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt))
     .slice(0, 3);
 
   const activeCount = teams.filter((t) => t.status === 'active' || t.status === 'advanced').length;
-  const completedCount = matches.filter((m) => m.status === 'completed').length;
+  const completedCount = games.filter((g) => g.status === 'completed').length;
+  const advancing = totalAdvancing(leaderboard, winnersPerZone);
 
   const stats = [
     { label: 'Teams competing', value: activeCount, icon: Users },
     { label: 'Players', value: players.length, icon: Trophy },
-    { label: 'Matches played', value: completedCount, icon: ListChecks },
-    { label: 'Teams advancing', value: advanceCount, icon: Crown },
+    { label: 'Games played', value: completedCount, icon: ListChecks },
+    { label: 'Teams advancing', value: advancing, icon: Crown },
   ];
 
   return (
@@ -200,12 +202,12 @@ export default function Landing() {
           <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-brandred-500/10 blur-3xl" />
           <div className="relative max-w-2xl">
             <span className="text-xs font-semibold uppercase tracking-[0.2em] text-brandred-400">The team scoring rule</span>
-            <h2 className="mt-3 text-3xl font-semibold text-white">Scores count by team, not by player</h2>
+            <h2 className="mt-3 text-3xl font-semibold text-white">Scores count by team, ranked by zone</h2>
             <p className="mt-4 text-gray-300">
-              Every team member’s points are added together into one team score. There are no
-              individual rankings to chase — your squad rises or falls together. When a round ends,
-              the <span className="font-semibold text-brandred-400">top {advanceCount} teams</span> on the
-              leaderboard advance to the next stage.
+              Every team member’s points are added together into one team score. Teams compete only within
+              their <span className="font-semibold text-brandred-400">geopolitical zone</span>, and when a
+              round ends the <span className="font-semibold text-brandred-400">top {winnersPerZone} of each zone</span> advance — so the
+              number moving on depends on how many zones are in play.
             </p>
             <Button to="/register" className="mt-6">Register your team <ArrowRight className="h-4 w-4" /></Button>
           </div>

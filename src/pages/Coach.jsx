@@ -6,11 +6,13 @@ import { useCheckmate } from '../hooks/useCheckmate.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { createTeam } from '../lib/api.js';
 import { fmtScore, teamById } from '../lib/format.js';
+import { STATES, zoneOfState, zoneOfTeam } from '../lib/zones.js';
 
 export default function Coach() {
   const { user } = useAuth();
   const { teams, players, games, leaderboard } = useCheckmate();
   const [name, setName] = useState('');
+  const [state, setState] = useState('');
   const [busy, setBusy] = useState(false);
 
   const myTeams = teams.filter((t) => t.coachId === user?.coachId);
@@ -18,9 +20,10 @@ export default function Coach() {
   const addTeam = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (!state) { alert('Please select the team\'s state.'); return; }
     setBusy(true);
-    await createTeam({ name: name.trim(), coachId: user.coachId, status: 'active' });
-    setName('');
+    await createTeam({ name: name.trim(), coachId: user.coachId, status: 'active', state });
+    setName(''); setState('');
     setBusy(false);
   };
 
@@ -53,11 +56,20 @@ export default function Coach() {
             placeholder="Team name (e.g. Royal Knights)"
             className="flex-1 rounded-lg border border-white/10 bg-board-900 px-3 py-2.5 text-white placeholder-gray-500 outline-none focus:border-brandred-500"
           />
+          <select
+            value={state} onChange={(e) => setState(e.target.value)}
+            className="rounded-lg border border-white/10 bg-board-900 px-3 py-2.5 text-white outline-none focus:border-brandred-500 sm:w-48"
+          >
+            <option value="">State…</option>
+            {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
           <Button as="button" type="submit" disabled={busy}>
             <Plus className="h-4 w-4" /> {busy ? 'Adding…' : 'Add team'}
           </Button>
         </form>
-        <p className="mt-2 text-xs text-gray-500">Teams go live right away and get a join code to share with players.</p>
+        <p className="mt-2 text-xs text-gray-500">
+          Teams join their state's geopolitical zone{state ? ` — ${zoneOfState(state)}` : ''}. They go live right away with a join code for players.
+        </p>
       </Card>
 
       {/* Teams */}
@@ -78,11 +90,11 @@ export default function Coach() {
                     <TeamMark name={t.name} logoUrl={t.logoUrl} size={40} />
                     <div>
                       <div className="flex items-center gap-2 font-medium text-white">{t.name} <StatusPill status={t.status} /></div>
-                      <div className="text-xs text-gray-500">Join code <span className="font-mono text-brandred-400">{t.joinCode}</span></div>
+                      <div className="text-xs text-gray-500">{t.state || '—'} · {zoneOfTeam(t)} · Join code <span className="font-mono text-brandred-400">{t.joinCode}</span></div>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 text-sm text-gray-400">
-                    {row && <span>Rank <span className="font-semibold text-white">#{row.rank}</span></span>}
+                    {row && <span>Zone rank <span className="font-semibold text-white">#{row.zoneRank}</span></span>}
                     <span className="inline-flex items-center gap-1"><TrendingUp className="h-4 w-4 text-brandred-400" /> <span className="font-mono font-bold text-white">{fmtScore(row?.total ?? 0)}</span></span>
                   </div>
                 </div>

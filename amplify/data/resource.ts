@@ -15,6 +15,21 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
  * backend means swapping that file's bodies for generateClient<Schema>() calls.
  */
 const schema = a.schema({
+  UserProfile: a
+    .model({
+      email: a.string().required(),
+      displayName: a.string(),
+      role: a.enum(['admin', 'coach', 'player']),
+      playerId: a.string(),
+      teamId: a.string(),
+      coachId: a.string(),
+    })
+    .authorization((allow) => [
+      allow.owner(),
+      allow.group('Admins'),
+      allow.authenticated().to(['read']),
+    ]),
+
   Team: a
     .model({
       name: a.string().required(),
@@ -22,6 +37,8 @@ const schema = a.schema({
       status: a.enum(['pending', 'active', 'advanced', 'eliminated']),
       round: a.integer().default(1),
       joinCode: a.string().required(),
+      coachId: a.string(),
+      state: a.string(),
       players: a.hasMany('Player', 'teamId'),
     })
     .authorization((allow) => [
@@ -59,6 +76,33 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.guest().to(['read']),
       allow.authenticated().to(['read']),
+      allow.group('Admins'),
+    ]),
+
+  Game: a
+    .model({
+      matchId: a.string(),
+      round: a.integer().default(1),
+      whiteTeamId: a.string(),
+      whitePlayerId: a.string(),
+      blackTeamId: a.string(),
+      blackPlayerId: a.string(),
+      fen: a.string(),
+      pgn: a.string(),
+      status: a.enum(['scheduled', 'live', 'completed']),
+      result: a.string(),
+      winnerTeamId: a.string(),
+      clockMs: a.integer(),
+      incrementMs: a.integer(),
+      whiteMs: a.integer(),
+      blackMs: a.integer(),
+      lastMoveAt: a.string(),
+      startedAt: a.string(),
+      endedAt: a.string(),
+    })
+    .authorization((allow) => [
+      allow.guest().to(['read']),
+      allow.authenticated().to(['read', 'update']),
       allow.group('Admins'),
     ]),
 
