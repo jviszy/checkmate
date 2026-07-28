@@ -1,187 +1,245 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Data layer.
 //
-// The SINGLE place the UI talks to for data. Backed by AWS Amplify Gen 2 AppSync
-// subscriptions so live games and the scoreboard update everywhere at once.
+// The SINGLE place the UI talks to for data. Backed by localStorage today, with
+// cross-tab realtime sync (BroadcastChannel + storage events) so live games and
+// the scoreboard update everywhere at once — a stand-in for the AWS AppSync
+// subscriptions that take over once the Amplify backend is deployed. Function
+// signatures/shapes match the planned backend, so UI code won't change.
 // ─────────────────────────────────────────────────────────────────────────
 
-import { generateClient } from 'aws-amplify/data';
-import { INITIAL_FEN } from './seed.js';
+import { emptyDb, sampleDb, INITIAL_FEN } from './seed.js';
 
-// The amplify client instance (assumes main.jsx has configured Amplify)
-const client = generateClient();
-const ok = (v) => Promise.resolve(v);
+const KEY = 'checkmate.db.v2';
+const EVT = 'checkmate:change';
 
-export function onChange(cb) {
-  const sub1 = client.models.Game.onUpdate().subscribe({ next: () => cb() });
-  const sub2 = client.models.Match.onUpdate().subscribe({ next: () => cb() });
-  const sub3 = client.models.Tournament.onUpdate().subscribe({ next: () => cb() });
-  return () => {
-    sub1.unsubscribe();
-    sub2.unsubscribe();
-    sub3.unsubscribe();
-  };
+function read() {
+  const raw = localStorage.getItem(KEY);
+  if (raw) {
+    try { return JSON.parse(raw); } catch { /* fall through */ }
+  }
+  const fresh = emptyDb();
+  localStorage.setItem(KEY, JSON.stringify(fresh));
+  return fresh;
 }
 
-export function loadSampleData() { /* no-op in cloud */ }
-export function clearData() { /* no-op in cloud */ }
+let db = read();
+
+// Cross-tab realtime: broadcast a ping on every write; peers reload + refresh.
+let channel = null;
+try { channel = new BroadcastChannel('checkmate:sync'); } catch { channel = null; }
+
+function reloadFromStorage() {
+  const raw = localStorage.getItem(KEY);
+  if (raw) { try { db = JSON.parse(raw); } catch { /* ignore */ } }
+  window.dispatchEvent(new Event(EVT));
+}
+
+if (channel) channel.onmessage = () => reloadFromStorage();
+window.addEventListener('storage', (e) => { if (e.key === KEY) reloadFromStorage(); });
+
+function persist() {
+  localStorage.setItem(KEY, JSON.stringify(db));
+  window.dispatchEvent(new Event(EVT));
+  if (channel) { try { channel.postMessage(Date.now()); } catch { /* ignore */ } }
+}
+
+/** Subscribe to any data change (local or from another tab/device). */
+export function onChange(cb) {
+  window.addEventListener(EVT, cb);
+  return () => window.removeEventListener(EVT, cb);
+}
+
+/** Load the demo dataset (teams, players, live games) — admin/testing only. */
+export function loadSampleData() {
+  db = sampleDb();
+  persist();
+}
+
+/** Reset to a clean, empty pre-launch competition. */
+export function clearData() {
+  db = emptyDb();
+  persist();
+}
+
+const uid = (prefix) =>
+  `${prefix}_${Math.random().toString(36).slice(2, 9)}${(db._n = (db._n || 0) + 1)}`;
+const clone = (v) => JSON.parse(JSON.stringify(v));
+const ok = (v) => Promise.resolve(clone(v));
+
+function genJoinCode() {
+  return Array.from({ length: 6 }, () =>
+    'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]
+  ).join('');
+}
 
 // ── Tournament ──────────────────────────────────────────────────────────────
-export const getTournament = async () => {
-  const { data } = await client.models.Tournament.list();
-  if (data.length === 0) {
-    const { data: newT } = await client.models.Tournament.create({ name: "Checkmate Tournament", currentRound: 1, advanceCount: 6 });
-    return newT;
-  }
-  return data[0];
-};
-
-export async function updateTournament(patch) {
-  const t = await getTournament();
-  if (!t) return null;
-  const { data } = await client.models.Tournament.update({ id: t.id, ...patch });
-  return data;
+export const getTournament = () => ok(db.tournament);
+export function updateTournament(patch) {
+  db.tournament = { ...db.tournament, ...patch };
+  persist();
+  return ok(db.tournament);
 }
 
 // ── Teams ─────────────────────────────────────────────────────────────────--
-export const listTeams = async () => (await client.models.Team.list()).data;
-export const getTeam = async (id) => (await client.models.Team.get({ id })).data;
-export const listTeamsByCoach = async (coachId) => (await client.models.Team.list({ filter: { coachId: { eq: coachId } } })).data;
-export const getTeamByJoinCode = async (code) => {
-  const { data } = await client.models.Team.list({ filter: { joinCode: { eq: String(code).toUpperCase() } } });
-  return data[0] || null;
-};
+export const listTeams = () => ok(db.teams);
+export const getTeam = (id) => ok(db.teams.find((t) => t.id === id) || null);
+export const listTeamsByCoach = (coachId) => ok(db.teams.filter((t) => t.coachId === coachId));
+export const getTeamByJoinCode = (code) =>
+  ok(db.teams.find((t) => t.joinCode?.toUpperCase() === String(code).toUpperCase()) || null);
 
-export async function createTeam({ name, logoUrl = '', coachId = null, status = 'active', state = '' }) {
-  const t = await getTournament();
-  const joinCode = Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
-  const { data } = await client.models.Team.create({ name, logoUrl, status, coachId, state, joinCode, round: t?.currentRound || 1 });
-  return data;
+export function createTeam({ name, logoUrl = '', coachId = null, status = 'active', state = '' }) {
+  const team = {
+    id: uid('team'), name, logoUrl, status, coachId, state,
+    round: db.tournament.currentRound,
+    joinCode: genJoinCode(),
+    createdAt: new Date().toISOString(),
+  };
+  db.teams = [...db.teams, team];
+  persist();
+  return ok(team);
 }
 
-export async function updateTeam(id, patch) {
-  const { data } = await client.models.Team.update({ id, ...patch });
-  return data;
+export function updateTeam(id, patch) {
+  db.teams = db.teams.map((t) => (t.id === id ? { ...t, ...patch } : t));
+  persist();
+  return ok(db.teams.find((t) => t.id === id));
 }
 
-export async function deleteTeam(id) {
-  await client.models.Team.delete({ id });
-  return true;
+export function deleteTeam(id) {
+  db.teams = db.teams.filter((t) => t.id !== id);
+  db.players = db.players.filter((p) => p.teamId !== id);
+  db.matches = db.matches.filter((m) => m.teamAId !== id && m.teamBId !== id);
+  db.games = db.games.filter((g) => g.whiteTeamId !== id && g.blackTeamId !== id);
+  persist();
+  return ok(true);
 }
 
 export const approveTeam = (id) => updateTeam(id, { status: 'active' });
 export const rejectTeam = (id) => deleteTeam(id);
 
 // ── Players ───────────────────────────────────────────────────────────────--
-export const listPlayers = async () => (await client.models.Player.list()).data;
-export const listPlayersByTeam = async (teamId) => (await client.models.Player.list({ filter: { teamId: { eq: teamId } } })).data;
-export const getPlayer = async (id) => (await client.models.Player.get({ id })).data;
+export const listPlayers = () => ok(db.players);
+export const listPlayersByTeam = (teamId) => ok(db.players.filter((p) => p.teamId === teamId));
+export const getPlayer = (id) => ok(db.players.find((p) => p.id === id) || null);
 
-export async function createPlayer({ teamId, displayName, email, isCaptain = false, individualScore = 0 }) {
-  const { data } = await client.models.Player.create({ teamId, displayName, email, isCaptain, individualScore });
-  return data;
+export function createPlayer({ teamId, displayName, email, isCaptain = false, individualScore = 0 }) {
+  const player = { id: uid('p'), teamId, displayName, email, isCaptain, individualScore };
+  db.players = [...db.players, player];
+  persist();
+  return ok(player);
 }
 
-export async function updatePlayer(id, patch) {
-  const { data } = await client.models.Player.update({ id, ...patch });
-  return data;
+export function updatePlayer(id, patch) {
+  db.players = db.players.map((p) => (p.id === id ? { ...p, ...patch } : p));
+  persist();
+  return ok(db.players.find((p) => p.id === id));
 }
 
-export async function deletePlayer(id) {
-  await client.models.Player.delete({ id });
-  return true;
+export function deletePlayer(id) {
+  db.players = db.players.filter((p) => p.id !== id);
+  persist();
+  return ok(true);
 }
 
 // ── Matches (team fixtures) ─────────────────────────────────────────────────
-export const listMatches = async () => (await client.models.Match.list()).data;
+export const listMatches = () => ok(db.matches);
 
-export async function createMatches(records) {
-  const created = [];
-  for (const r of records) {
-    const { data } = await client.models.Match.create({ scoreA: 0, scoreB: 0, status: 'scheduled', ...r });
-    created.push(data);
-  }
-  return created;
+export function createMatches(records) {
+  const created = records.map((r) => ({ id: uid('m'), scoreA: 0, scoreB: 0, ...r }));
+  db.matches = [...db.matches, ...created];
+  persist();
+  return ok(created);
 }
 
-export async function updateMatch(id, patch) {
-  const { data } = await client.models.Match.update({ id, ...patch });
-  return data;
+export function updateMatch(id, patch) {
+  db.matches = db.matches.map((m) => (m.id === id ? { ...m, ...patch } : m));
+  persist();
+  return ok(db.matches.find((m) => m.id === id));
 }
 
-export async function deleteMatchesForRound(round) {
-  const { data } = await client.models.Match.list({ filter: { round: { eq: round } } });
-  for (const m of data) await client.models.Match.delete({ id: m.id });
-  return true;
+export function deleteMatchesForRound(round) {
+  const ids = db.matches.filter((m) => m.round === round).map((m) => m.id);
+  db.matches = db.matches.filter((m) => m.round !== round);
+  db.games = db.games.filter((g) => !ids.includes(g.matchId));
+  persist();
+  return ok(true);
 }
 
 // ── Games (playable chess boards — the scored unit) ─────────────────────────
-export const listGames = async () => (await client.models.Game.list()).data;
-export const getGame = async (id) => (await client.models.Game.get({ id })).data;
+export const listGames = () => ok(db.games);
+export const getGame = (id) => ok(db.games.find((g) => g.id === id) || null);
 
+// Default time control: 10 minutes each with a 3-second increment per move.
 export const DEFAULT_CLOCK_MS = 10 * 60 * 1000;
 export const DEFAULT_INCREMENT_MS = 3 * 1000;
 
-export async function createGame({
+export function createGame({
   matchId = null, round = 1, whiteTeamId, whitePlayerId, blackTeamId, blackPlayerId,
   clockMs = DEFAULT_CLOCK_MS, incrementMs = DEFAULT_INCREMENT_MS,
 }) {
-  const { data } = await client.models.Game.create({
-    matchId, round, whiteTeamId, whitePlayerId, blackTeamId, blackPlayerId,
-    fen: INITIAL_FEN, pgn: '', status: 'scheduled', clockMs, incrementMs, whiteMs: clockMs, blackMs: clockMs
+  const game = {
+    id: uid('game'), matchId, round,
+    whiteTeamId, whitePlayerId, blackTeamId, blackPlayerId,
+    fen: INITIAL_FEN, pgn: '', status: 'scheduled',
+    result: null, winnerTeamId: null,
+    clockMs, incrementMs, whiteMs: clockMs, blackMs: clockMs, lastMoveAt: null,
+    startedAt: null, endedAt: null, createdAt: new Date().toISOString(),
+  };
+  db.games = [...db.games, game];
+  persist();
+  return ok(game);
+}
+
+/** Persist a move (fen + pgn + clocks). Flips a scheduled game to live. */
+export function updateGame(id, { fen, pgn, status, whiteMs, blackMs, lastMoveAt }) {
+  db.games = db.games.map((g) => {
+    if (g.id !== id) return g;
+    const next = { ...g, fen, pgn };
+    if (whiteMs !== undefined) next.whiteMs = whiteMs;
+    if (blackMs !== undefined) next.blackMs = blackMs;
+    if (lastMoveAt !== undefined) next.lastMoveAt = lastMoveAt;
+    if (status) next.status = status;
+    else if (g.status === 'scheduled') next.status = 'live';
+    if (next.status === 'live' && !g.startedAt) next.startedAt = new Date().toISOString();
+    return next;
   });
-  return data;
+  persist();
+  return ok(db.games.find((g) => g.id === id));
 }
 
-export async function updateGame(id, { fen, pgn, status, whiteMs, blackMs, lastMoveAt }) {
-  const patch = { id };
-  if (fen !== undefined) patch.fen = fen;
-  if (pgn !== undefined) patch.pgn = pgn;
-  if (whiteMs !== undefined) patch.whiteMs = whiteMs;
-  if (blackMs !== undefined) patch.blackMs = blackMs;
-  if (lastMoveAt !== undefined) patch.lastMoveAt = lastMoveAt;
-  
-  const g = await getGame(id);
-  if (status) patch.status = status;
-  else if (g?.status === 'scheduled') patch.status = 'live';
-  
-  if (patch.status === 'live' && g && !g.startedAt) patch.startedAt = new Date().toISOString();
-
-  const { data } = await client.models.Game.update(patch);
-  return data;
-}
-
-export async function completeGame(id, result, { fen, pgn } = {}) {
-  const game = await getGame(id);
-  if (!game || game.status === 'completed') return game;
+/**
+ * Finish a game. result: 'white' | 'black' | 'draw'.
+ * Awards points to the players (win 1, draw 0.5) — which roll up into the team
+ * total and the scoreboard automatically — then recomputes the parent match.
+ */
+export function completeGame(id, result, { fen, pgn } = {}) {
+  const game = db.games.find((g) => g.id === id);
+  if (!game || game.status === 'completed') return ok(game || null);
 
   const winnerTeamId = result === 'white' ? game.whiteTeamId : result === 'black' ? game.blackTeamId : null;
-  const patch = { id, status: 'completed', result, winnerTeamId, endedAt: new Date().toISOString() };
-  if (fen) patch.fen = fen;
-  if (pgn) patch.pgn = pgn;
-  
-  await client.models.Game.update(patch);
-  
-  const award = async (playerId, pts) => {
-    const p = await getPlayer(playerId);
-    if (p) await client.models.Player.update({ id: playerId, individualScore: (Number(p.individualScore) || 0) + pts });
+  const award = (playerId, pts) => {
+    db.players = db.players.map((p) => (p.id === playerId ? { ...p, individualScore: (Number(p.individualScore) || 0) + pts } : p));
   };
-  
-  if (result === 'white') await award(game.whitePlayerId, 1);
-  else if (result === 'black') await award(game.blackPlayerId, 1);
-  else { await award(game.whitePlayerId, 0.5); await award(game.blackPlayerId, 0.5); }
+  if (result === 'white') award(game.whitePlayerId, 1);
+  else if (result === 'black') award(game.blackPlayerId, 1);
+  else { award(game.whitePlayerId, 0.5); award(game.blackPlayerId, 0.5); }
 
-  if (game.matchId) await recomputeMatch(game.matchId);
-  return await getGame(id);
+  db.games = db.games.map((g) => (g.id === id
+    ? { ...g, status: 'completed', result, winnerTeamId, endedAt: new Date().toISOString(), ...(fen ? { fen } : {}), ...(pgn ? { pgn } : {}) }
+    : g));
+
+  if (game.matchId) recomputeMatch(game.matchId);
+  persist();
+  return ok(db.games.find((g) => g.id === id));
 }
 
-async function recomputeMatch(matchId) {
-  const match = (await client.models.Match.get({ id: matchId })).data;
+/** Roll a match's completed games up into its team scores. */
+function recomputeMatch(matchId) {
+  const match = db.matches.find((m) => m.id === matchId);
   if (!match) return;
-  const games = (await client.models.Game.list({ filter: { matchId: { eq: matchId } } })).data;
-  
   let a = 0, b = 0, anyLive = false, allDone = true;
-  for (const g of games) {
+  for (const g of db.games.filter((x) => x.matchId === matchId)) {
     if (g.status === 'live') anyLive = true;
     if (g.status !== 'completed') { allDone = false; continue; }
     const wPts = g.result === 'white' ? 1 : g.result === 'draw' ? 0.5 : 0;
@@ -190,15 +248,22 @@ async function recomputeMatch(matchId) {
     b += g.blackTeamId === match.teamBId ? bPts : wPts;
   }
   const status = allDone ? 'completed' : anyLive ? 'live' : match.status;
-  await client.models.Match.update({ id: matchId, scoreA: a, scoreB: b, status });
+  db.matches = db.matches.map((m) => (m.id === matchId ? { ...m, scoreA: a, scoreB: b, status } : m));
 }
 
-// ── User Profiles ───────────────────────────────────────────────────────────
-export async function createUserProfile(profile) {
-  const { data } = await client.models.UserProfile.create(profile);
-  return data;
+// ── Users (mock auth — replaced by Cognito under Amplify) ───────────────────
+export const listUsers = () => ok(db.users);
+export function findUser(email) {
+  return ok(db.users.find((u) => u.email.toLowerCase() === email.toLowerCase()) || null);
 }
-export async function getUserProfile(email) {
-  const { data } = await client.models.UserProfile.list({ filter: { email: { eq: email } } });
-  return data[0] || null;
+export function createUser(user) {
+  db.users = [...db.users, user];
+  persist();
+  return ok(user);
+}
+export function updateUser(email, patch) {
+  db.users = db.users.map((u) =>
+    u.email.toLowerCase() === email.toLowerCase() ? { ...u, ...patch } : u);
+  persist();
+  return ok(db.users.find((u) => u.email.toLowerCase() === email.toLowerCase()));
 }
