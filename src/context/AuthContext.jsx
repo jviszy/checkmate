@@ -1,29 +1,77 @@
-// Auth context.
+// Auth context — AWS Cognito (Amplify Auth) edition.
 //
-// Backed by the mock user store today so login/registration work offline.
-// When Amplify is deployed, replace the method bodies with Amplify Auth calls
-// (signIn, signUp, confirmSignUp, getCurrentUser, signOut) and read the Cognito
-// groups for role. The shape exposed to the app stays identical.
+// Cognito owns credentials and confirms accounts automatically (pre-sign-up
+// trigger), so registration is frictionless. A signed-in user's role comes from
+// their Cognito group ('Admins') and their UserProfile row (coach/player). The
+// shape exposed to the app is identical to the old mock, so pages don't change.
 //
-// Roles: 'admin' (organizer) · 'coach' (manages teams) · 'player'.
+// Roles: 'admin' (organizer, Cognito "Admins" group) · 'coach' · 'player'.
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import {
+  signUp as amplifySignUp,
+  signIn as amplifySignIn,
+  signOut as amplifySignOut,
+  autoSignIn,
+  getCurrentUser,
+  fetchAuthSession,
+  fetchUserAttributes,
+} from 'aws-amplify/auth';
 import {
   findUser, createUser, createPlayer, createTeam, getTeamByJoinCode,
 } from '../lib/api.js';
 
 const AuthContext = createContext(null);
-const SESSION_KEY = 'checkmate.session.v1';
 
-function sessionFrom(u) {
+async function signOutSafe() {
+  try { await amplifySignOut(); } catch { /* ignore */ }
+}
+
+/** Read the current Cognito session into the app's user shape. */
+async function loadSession() {
+  const session = await fetchAuthSession();
+  const groups = session.tokens?.accessToken?.payload['cognito:groups'];
+  const isAdmin = Array.isArray(groups) && groups.includes('Admins');
+
+  let email = '';
+  try { email = (await fetchUserAttributes()).email || ''; } catch { /* ignore */ }
+
+  let profile = null;
+  try { profile = email ? await findUser(email) : null; } catch { /* ignore */ }
+
   return {
-    email: u.email,
-    displayName: u.displayName,
-    role: u.role || (u.isAdmin ? 'admin' : 'player'),
-    playerId: u.playerId || null,
-    teamId: u.teamId || null,
-    coachId: u.coachId || null,
+    email: profile?.email || email,
+    displayName: profile?.displayName || (email ? email.split('@')[0] : 'User'),
+    role: isAdmin ? 'admin' : (profile?.role || 'player'),
+    playerId: profile?.playerId || null,
+    teamId: profile?.teamId || null,
+    coachId: profile?.coachId || null,
   };
+}
+
+/** Create the account (auto-confirmed) and leave the user signed in. */
+async function signUpAndSignIn(email, password) {
+  await signOutSafe();
+  try {
+    const res = await amplifySignUp({
+      username: email,
+      password,
+      options: { userAttributes: { email }, autoSignIn: true },
+    });
+    if (res.nextStep?.signUpStep === 'COMPLETE_AUTO_SIGN_IN') {
+      try { await autoSignIn(); } catch { /* fall through to explicit sign-in */ }
+    }
+  } catch (e) {
+    if (e?.name === 'UsernameExistsException') {
+      throw new Error('An account with that email already exists.');
+    }
+    if (e?.name === 'InvalidPasswordException') {
+      throw new Error('Password must be at least 8 characters.');
+    }
+    throw e;
+  }
+  try { await getCurrentUser(); return; } catch { /* not signed in yet */ }
+  await amplifySignIn({ username: email, password });
 }
 
 export function AuthProvider({ children }) {
@@ -31,60 +79,71 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (raw) {
-      try { setUser(JSON.parse(raw)); } catch { /* ignore */ }
-    }
-    setLoading(false);
-  }, []);
-
-  const persistSession = useCallback((u) => {
-    if (u) localStorage.setItem(SESSION_KEY, JSON.stringify(u));
-    else localStorage.removeItem(SESSION_KEY);
-    setUser(u);
+    (async () => {
+      try {
+        await getCurrentUser();
+        setUser(await loadSession());
+      } catch {
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const signIn = useCallback(async (email, password) => {
-    const found = await findUser(email);
-    if (!found || found.password !== password) {
-      throw new Error('Incorrect email or password.');
+    await signOutSafe();
+    try {
+      await amplifySignIn({ username: email, password });
+    } catch (e) {
+      if (e?.name === 'UserNotFoundException' || e?.name === 'NotAuthorizedException') {
+        throw new Error('Incorrect email or password.');
+      }
+      if (e?.name === 'UserAlreadyAuthenticatedException') {
+        // already signed in as this user — just load it
+      } else {
+        throw e;
+      }
     }
-    const session = sessionFrom(found);
-    persistSession(session);
+    const session = await loadSession();
+    setUser(session);
     return session;
-  }, [persistSession]);
+  }, []);
 
-  // Captain registers a brand new team (pending → admin approves).
+  // Captain registers a brand new team — goes live immediately.
   const registerCaptain = useCallback(async ({ email, password, displayName, teamName, state }) => {
-    if (await findUser(email)) throw new Error('An account with that email already exists.');
+    await signUpAndSignIn(email, password);
     const team = await createTeam({ name: teamName, state });
     const player = await createPlayer({ teamId: team.id, displayName, email, isCaptain: true });
-    await createUser({ email, password, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
-    persistSession({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
+    await createUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
+    setUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
     return { team, player };
-  }, [persistSession]);
+  }, []);
 
   // Member joins an existing team with its join code.
   const registerMember = useCallback(async ({ email, password, displayName, joinCode }) => {
-    if (await findUser(email)) throw new Error('An account with that email already exists.');
     const team = await getTeamByJoinCode(joinCode);
     if (!team) throw new Error('No team found for that join code.');
+    await signUpAndSignIn(email, password);
     const player = await createPlayer({ teamId: team.id, displayName, email, isCaptain: false });
-    await createUser({ email, password, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
-    persistSession({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
+    await createUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
+    setUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
     return { team, player };
-  }, [persistSession]);
+  }, []);
 
   // Coach registers — gets their own coachId and manages teams from /coach.
   const registerCoach = useCallback(async ({ email, password, displayName }) => {
-    if (await findUser(email)) throw new Error('An account with that email already exists.');
+    await signUpAndSignIn(email, password);
     const coachId = `coach_${Math.random().toString(36).slice(2, 9)}`;
-    await createUser({ email, password, displayName, role: 'coach', playerId: null, teamId: null, coachId });
-    persistSession({ email, displayName, role: 'coach', playerId: null, teamId: null, coachId });
+    await createUser({ email, displayName, role: 'coach', playerId: null, teamId: null, coachId });
+    setUser({ email, displayName, role: 'coach', playerId: null, teamId: null, coachId });
     return { coachId };
-  }, [persistSession]);
+  }, []);
 
-  const signOut = useCallback(async () => { persistSession(null); }, [persistSession]);
+  const signOut = useCallback(async () => {
+    await signOutSafe();
+    setUser(null);
+  }, []);
 
   const value = {
     user,

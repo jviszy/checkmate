@@ -3,16 +3,20 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 /**
  * Checkmate data model (AWS AppSync + DynamoDB).
  *
- * Authorization summary:
- *  - guests/public can READ teams, matches and the tournament (powers the
- *    public leaderboard + schedule).
- *  - any signed-in user can read everything they need for their dashboard.
- *  - the "Admins" Cognito group has full create/update/delete (approvals,
- *    score entry, match generation, advancing rounds).
- *  - a captain (owner) may update their own team record.
+ * Authorization model — tuned for a school chess event, not a bank:
+ *  - PUBLIC (API key) can READ teams, players, matches, games and the tournament.
+ *    This powers the public landing page: leaderboard, schedule and live boards,
+ *    all visible without signing in.
+ *  - Any SIGNED-IN user (Cognito user pool) can create their team + players at
+ *    registration, and can update games/players/matches as games are played
+ *    (completing a board awards points to BOTH players and rolls the result up
+ *    into the parent match — so writes are intentionally not owner-scoped).
+ *  - The "Admins" Cognito group has FULL control, including delete (removing
+ *    teams, regenerating fixtures, advancing rounds, editing any score).
+ *  - UserProfile is owner-scoped: each account reads/writes only its own profile;
+ *    Admins can read every profile.
  *
- * The frontend's src/lib/api.js mirrors these model shapes, so wiring the real
- * backend means swapping that file's bodies for generateClient<Schema>() calls.
+ * The frontend's src/lib/api.js talks to these models via generateClient().
  */
 const schema = a.schema({
   UserProfile: a
@@ -42,9 +46,8 @@ const schema = a.schema({
       players: a.hasMany('Player', 'teamId'),
     })
     .authorization((allow) => [
-      allow.guest().to(['read']),
-      allow.authenticated().to(['read']),
-      allow.owner().to(['read', 'update']),
+      allow.publicApiKey().to(['read']),
+      allow.authenticated().to(['read', 'create', 'update']),
       allow.group('Admins'),
     ]),
 
@@ -58,8 +61,8 @@ const schema = a.schema({
       individualScore: a.float().default(0),
     })
     .authorization((allow) => [
-      allow.authenticated().to(['read']),
-      allow.owner().to(['read', 'update']),
+      allow.publicApiKey().to(['read']),
+      allow.authenticated().to(['read', 'create', 'update']),
       allow.group('Admins'),
     ]),
 
@@ -74,8 +77,8 @@ const schema = a.schema({
       status: a.enum(['scheduled', 'live', 'completed']),
     })
     .authorization((allow) => [
-      allow.guest().to(['read']),
-      allow.authenticated().to(['read']),
+      allow.publicApiKey().to(['read']),
+      allow.authenticated().to(['read', 'update']),
       allow.group('Admins'),
     ]),
 
@@ -101,7 +104,7 @@ const schema = a.schema({
       endedAt: a.string(),
     })
     .authorization((allow) => [
-      allow.guest().to(['read']),
+      allow.publicApiKey().to(['read']),
       allow.authenticated().to(['read', 'update']),
       allow.group('Admins'),
     ]),
@@ -110,11 +113,11 @@ const schema = a.schema({
     .model({
       name: a.string().required(),
       currentRound: a.integer().default(1),
-      advanceCount: a.integer().default(6),
+      winnersPerZone: a.integer().default(1),
       status: a.string(),
     })
     .authorization((allow) => [
-      allow.guest().to(['read']),
+      allow.publicApiKey().to(['read']),
       allow.authenticated().to(['read']),
       allow.group('Admins'),
     ]),
@@ -127,6 +130,6 @@ export const data = defineData({
   authorizationModes: {
     // Public read uses the API key; signed-in users/admins use Cognito.
     defaultAuthorizationMode: 'userPool',
-    apiKeyAuthorizationMode: { expiresInDays: 30 },
+    apiKeyAuthorizationMode: { expiresInDays: 365 },
   },
 });

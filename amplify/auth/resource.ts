@@ -1,19 +1,21 @@
 import { defineAuth } from '@aws-amplify/backend';
+import { preSignUp } from './pre-sign-up/resource';
 
 /**
  * Cognito auth for Checkmate.
  *
  * - Email-based sign-up/sign-in for every player (each member has their own account).
- * - An "Admins" group for Coderina organizers. Add organizer accounts to this
- *   group in the Cognito console (or via the AWS CLI) — membership drives access
- *   to the admin panel and write access in the data layer below.
+ * - A pre-sign-up trigger auto-confirms accounts, so registration is frictionless
+ *   (no email verification code).
+ * - An "Admins" group for Coderina organizers. Membership drives access to the
+ *   admin panel and full write access in the data layer.
  */
 export const auth = defineAuth({
   loginWith: {
     email: true,
   },
   groups: ['Admins'],
-  userAttributes: {
-    preferredUsername: { required: false, mutable: true },
+  triggers: {
+    preSignUp,
   },
 });
