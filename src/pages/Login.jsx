@@ -22,7 +22,8 @@ export default function Login() {
     setBusy(true);
     try {
       const session = await signIn(email.trim(), password);
-      navigate(session.isAdmin && dest === '/dashboard' ? '/admin' : dest);
+      const home = session.role === 'admin' ? '/admin' : session.role === 'coach' ? '/coach' : '/dashboard';
+      navigate(dest === '/dashboard' ? home : dest);
     } catch (err) {
       setError(err.message);
     } finally {
