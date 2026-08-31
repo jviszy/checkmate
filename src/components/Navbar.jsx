@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Menu, X, LogOut, LayoutDashboard, Shield } from 'lucide-react';
+import { Menu, X, LogOut, LayoutDashboard, Shield, KeyRound } from 'lucide-react';
 import Logo from './Logo.jsx';
 import { Button } from './ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -56,6 +56,9 @@ export default function Navbar() {
           {isAuthed ? (
             <>
               <span className="text-sm text-gray-400">Hi, {user.displayName.split(' ')[0]}</span>
+              <Button variant="ghost" size="sm" to="/account">
+                <KeyRound className="h-4 w-4" /> Password
+              </Button>
               <Button variant="ghost" size="sm" onClick={handleSignOut}>
                 <LogOut className="h-4 w-4" /> Sign out
               </Button>
@@ -98,6 +101,11 @@ export default function Navbar() {
             {isAdmin && (
               <NavLink to="/admin" className={linkClass} onClick={() => setOpen(false)}>
                 <Shield className="mr-1 inline h-4 w-4" /> Admin
+              </NavLink>
+            )}
+            {isAuthed && (
+              <NavLink to="/account" className={linkClass} onClick={() => setOpen(false)}>
+                <KeyRound className="mr-1 inline h-4 w-4" /> Change password
               </NavLink>
             )}
             <div className="mt-3 flex flex-col gap-2">

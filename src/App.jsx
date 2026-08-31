@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Coach from './pages/Coach.jsx';
 import Admin from './pages/Admin.jsx';
 import Play from './pages/Play.jsx';
+import Account from './pages/Account.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
@@ -34,6 +35,10 @@ export default function App() {
         <Route
           path="/admin"
           element={<AdminRoute><Admin /></AdminRoute>}
+        />
+        <Route
+          path="/account"
+          element={<ProtectedRoute><Account /></ProtectedRoute>}
         />
         <Route path="*" element={<NotFound />} />
       </Route>
