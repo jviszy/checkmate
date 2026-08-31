@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { LogIn, AlertCircle, Info } from 'lucide-react';
+import { LogIn, AlertCircle } from 'lucide-react';
 import { Button, Card } from '../components/ui.jsx';
 import { KingGlyph } from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -59,15 +59,6 @@ export default function Login() {
           <Link to="/register" className="font-medium text-brandred-400 hover:text-brandred-300">Register a team</Link>
         </p>
       </Card>
-
-      <div className="mt-5 flex items-start gap-2 rounded-lg border border-white/10 bg-board-800/50 p-4 text-xs text-gray-400">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-brandred-500" />
-        <div>
-          <span className="font-medium text-gray-300">Demo accounts</span>
-          <div className="mt-1">Admin — <code className="text-brandred-400">admin@coderina.org</code> / <code className="text-brandred-400">admin123</code></div>
-          <div>Player — <code className="text-brandred-400">adaokeke@example.com</code> / <code className="text-brandred-400">player123</code></div>
-        </div>
-      </div>
     </div>
   );
 }
