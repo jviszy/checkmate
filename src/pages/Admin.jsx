@@ -10,6 +10,8 @@ import {
 } from '../lib/api.js';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
 import { fmtScore, teamName } from '../lib/format.js';
+import { STATES, zoneOfTeam } from '../lib/zones.js';
+import { groupByZone, totalAdvancing } from '../lib/scoring.js';
 
 const TABS = [
   { id: 'scores', label: 'Teams & Scores', icon: Users },
