@@ -55,6 +55,7 @@ const schema = a.schema({
     .model({
       displayName: a.string().required(),
       email: a.string().required(),
+      phone: a.string(),
       teamId: a.id().required(),
       team: a.belongsTo('Team', 'teamId'),
       isCaptain: a.boolean().default(false),
@@ -64,6 +65,22 @@ const schema = a.schema({
       allow.publicApiKey().to(['read']),
       allow.authenticated().to(['read', 'create', 'update']),
       allow.group('Admins'),
+    ]),
+
+  AuditLog: a
+    .model({
+      adminEmail: a.string().required(),
+      adminName: a.string(),
+      action: a.string().required(),
+      targetType: a.enum(['team', 'player']),
+      targetId: a.string().required(),
+      targetName: a.string(),
+      details: a.string(),
+      timestamp: a.datetime().required(),
+    })
+    .authorization((allow) => [
+      allow.group('Admins'),
+      allow.authenticated().to(['read', 'create']),
     ]),
 
   Match: a

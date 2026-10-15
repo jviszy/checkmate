@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Users, Hash, TrendingUp, Play, Star, Trophy } from 'lucide-react';
+import { Plus, Users, Hash, TrendingUp, Play, Star, Trophy, Edit2 } from 'lucide-react';
 import { Card, Button, StatusPill, TeamMark } from '../components/ui.jsx';
+import TeamEditorModal from '../components/TeamEditorModal.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { createTeam } from '../lib/api.js';
@@ -14,6 +15,7 @@ export default function Coach() {
   const [name, setName] = useState('');
   const [state, setState] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editingTeam, setEditingTeam] = useState(null);
 
   const myTeams = teams.filter((t) => t.coachId === user?.coachId);
 
@@ -96,6 +98,14 @@ export default function Coach() {
                   <div className="flex items-center gap-4 text-sm text-gray-400">
                     {row && <span>Zone rank <span className="font-semibold text-white">#{row.zoneRank}</span></span>}
                     <span className="inline-flex items-center gap-1"><TrendingUp className="h-4 w-4 text-brandred-400" /> <span className="font-mono font-bold text-white">{fmtScore(row?.total ?? 0)}</span></span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditingTeam(t)}
+                      className="ml-1"
+                    >
+                      <Edit2 className="h-3.5 w-3.5" /> Edit team
+                    </Button>
                   </div>
                 </div>
 
@@ -142,6 +152,16 @@ export default function Coach() {
             );
           })}
         </div>
+      )}
+
+      {editingTeam && (
+        <TeamEditorModal
+          team={editingTeam}
+          players={players}
+          isAdmin={false}
+          currentUser={user}
+          onClose={() => setEditingTeam(null)}
+        />
       )}
     </div>
   );

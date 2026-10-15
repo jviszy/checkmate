@@ -151,9 +151,9 @@ export async function getPlayer(id) {
   return unwrap(await client.models.Player.get({ id }, PUB)) || null;
 }
 
-export async function createPlayer({ teamId, displayName, email, isCaptain = false, individualScore = 0 }) {
+export async function createPlayer({ teamId, displayName, email, phone = '', isCaptain = false, individualScore = 0 }) {
   const player = unwrap(await client.models.Player.create({
-    teamId, displayName, email, isCaptain, individualScore,
+    teamId, displayName, email, ...(phone ? { phone } : {}), isCaptain, individualScore,
   }));
   return after(player);
 }
@@ -163,8 +163,56 @@ export async function updatePlayer(id, patch) {
 }
 
 export async function deletePlayer(id) {
+  // Also clean up any scheduled games involving this player
+  const games = await listAll('Game', {
+    filter: { or: [{ whitePlayerId: { eq: id } }, { blackPlayerId: { eq: id } }] }
+  });
+  await Promise.all(games.filter((g) => g.status === 'scheduled').map((g) => client.models.Game.delete({ id: g.id })));
   await client.models.Player.delete({ id });
   return after(true);
+}
+
+// ── Audit Logs (Admin changes) ──────────────────────────────────────────────
+export async function listAuditLogs() {
+  if (!client?.models?.AuditLog) {
+    const raw = localStorage.getItem('checkmate_audit_logs');
+    return raw ? JSON.parse(raw) : [];
+  }
+  try {
+    const logs = await listAll('AuditLog');
+    return logs.sort((a, b) => new Date(b.timestamp || b.createdAt) - new Date(a.timestamp || a.createdAt));
+  } catch {
+    const raw = localStorage.getItem('checkmate_audit_logs');
+    return raw ? JSON.parse(raw) : [];
+  }
+}
+
+export async function createAuditLog({ adminEmail, adminName = '', action, targetType, targetId, targetName = '', details = '' }) {
+  const timestamp = new Date().toISOString();
+  const entry = {
+    id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    adminEmail,
+    adminName,
+    action,
+    targetType,
+    targetId,
+    targetName,
+    details,
+    timestamp,
+  };
+  try {
+    if (client?.models?.AuditLog) {
+      await client.models.AuditLog.create(entry);
+    }
+  } catch (err) {
+    console.warn('Failed to save audit log to backend, falling back to local storage', err);
+  }
+  try {
+    const raw = localStorage.getItem('checkmate_audit_logs');
+    const existing = raw ? JSON.parse(raw) : [];
+    localStorage.setItem('checkmate_audit_logs', JSON.stringify([entry, ...existing].slice(0, 100)));
+  } catch { /* ignore */ }
+  return after(entry);
 }
 
 // ── Matches (team fixtures) ─────────────────────────────────────────────────

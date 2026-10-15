@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UserPlus, Users, UserCog, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { Button, Card } from '../components/ui.jsx';
+import { Button, Card, PasswordInput } from '../components/ui.jsx';
 import { KingGlyph } from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { STATES, zoneOfState } from '../lib/zones.js';
@@ -181,13 +181,17 @@ function Field({ label, type = 'text', value, onChange, ...rest }) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-sm font-medium text-gray-300">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-white/10 bg-board-900 px-3 py-2.5 text-white placeholder-gray-500 outline-none transition-colors focus:border-brandred-500 focus:ring-1 focus:ring-brandred-500"
-        {...rest}
-      />
+      {type === 'password' ? (
+        <PasswordInput value={value} onChange={onChange} {...rest} />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded-lg border border-white/10 bg-board-900 px-3 py-2.5 text-white placeholder-gray-500 outline-none transition-colors focus:border-brandred-500 focus:ring-1 focus:ring-brandred-500"
+          {...rest}
+        />
+      )}
     </label>
   );
 }

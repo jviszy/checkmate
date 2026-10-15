@@ -1,12 +1,14 @@
-import { useState, useMemo } from 'react';
-import { Trash2, Swords, Settings, Users, Flag, RefreshCw, Save, Play } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Trash2, Swords, Settings, Users, Flag, RefreshCw, Save, Play, Edit, Shield, ClipboardList, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, Button, StatusPill, TeamMark } from '../components/ui.jsx';
+import TeamEditorModal from '../components/TeamEditorModal.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import {
   deleteTeam, updatePlayer, createMatches,
   deleteMatchesForRound, updateTournament, updateTeam, loadSampleData, clearData,
-  createGame, completeGame,
+  createGame, completeGame, listAuditLogs, createAuditLog,
 } from '../lib/api.js';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
 import { fmtScore, teamName } from '../lib/format.js';
@@ -17,11 +19,14 @@ const TABS = [
   { id: 'scores', label: 'Teams & Scores', icon: Users },
   { id: 'matches', label: 'Matches', icon: Swords },
   { id: 'round', label: 'Round Control', icon: Settings },
+  { id: 'logs', label: 'Audit Log', icon: ClipboardList },
 ];
 
 export default function Admin() {
+  const { user } = useAuth();
   const { teams, players, matches, games, leaderboard, tournament } = useCheckmate();
   const [tab, setTab] = useState('scores');
+  const [editingTeam, setEditingTeam] = useState(null);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
@@ -57,29 +62,124 @@ export default function Admin() {
         ))}
       </div>
 
-      {tab === 'scores' && <Scores teams={teams} players={players} leaderboard={leaderboard} />}
+      {tab === 'scores' && (
+        <Scores
+          teams={teams}
+          players={players}
+          leaderboard={leaderboard}
+          onEditTeam={(t) => setEditingTeam(t)}
+          currentUser={user}
+        />
+      )}
       {tab === 'matches' && <MatchesAdmin teams={teams} players={players} matches={matches} games={games} tournament={tournament} />}
       {tab === 'round' && <RoundControl teams={teams} leaderboard={leaderboard} tournament={tournament} />}
+      {tab === 'logs' && <AuditLogsView />}
+
+      {editingTeam && (
+        <TeamEditorModal
+          team={editingTeam}
+          players={players}
+          isAdmin={true}
+          currentUser={user}
+          onClose={() => setEditingTeam(null)}
+        />
+      )}
     </div>
   );
 }
 
-/* ── Teams & Scores ────────────────────────────────────────────────────── */
-function Scores({ teams, players, leaderboard }) {
-  const active = teams;
-  if (!active.length) return <Card className="p-10 text-center text-gray-400">No teams yet. Teams appear here as they register.</Card>;
+function Scores({ teams, players, leaderboard, onEditTeam, currentUser }) {
+  const [query, setQuery] = useState('');
+  const [selectedTeamId, setSelectedTeamId] = useState('');
+
+  const filteredTeams = useMemo(() => {
+    let list = teams;
+    if (selectedTeamId) {
+      list = list.filter((t) => t.id === selectedTeamId);
+    }
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      list = list.filter((t) => t.name.toLowerCase().includes(q) || (t.state && t.state.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [teams, selectedTeamId, query]);
+
+  if (!teams.length) return <Card className="p-10 text-center text-gray-400">No teams yet. Teams appear here as they register.</Card>;
+
+  const handleScoreChange = async (p, newScore) => {
+    if (newScore !== p.individualScore) {
+      await updatePlayer(p.id, { individualScore: newScore });
+      const parentTeam = teams.find((t) => t.id === p.teamId);
+      if (currentUser) {
+        await createAuditLog({
+          adminEmail: currentUser.email,
+          adminName: currentUser.displayName || currentUser.email,
+          action: 'UPDATE_SCORE',
+          targetType: 'player',
+          targetId: p.id,
+          targetName: p.displayName,
+          details: `Changed score of ${p.displayName} (team "${parentTeam?.name || p.teamId}") from ${p.individualScore} to ${newScore}`,
+        });
+      }
+    }
+  };
+
+  const handleDeleteTeam = async (t) => {
+    if (confirm(`Delete team "${t.name}" and all its players & matches?`)) {
+      await deleteTeam(t.id);
+      if (currentUser) {
+        await createAuditLog({
+          adminEmail: currentUser.email,
+          adminName: currentUser.displayName || currentUser.email,
+          action: 'DELETE_TEAM',
+          targetType: 'team',
+          targetId: t.id,
+          targetName: t.name,
+          details: `Deleted team "${t.name}" (${t.state || 'no state'}) and all associated players and games.`,
+        });
+      }
+    }
+  };
 
   return (
     <div className="space-y-5">
+      {/* Team Picker & Filter Bar */}
+      <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 items-center gap-2">
+          <Search className="h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search teams by name or state…"
+            className="w-full bg-transparent text-sm text-white placeholder-gray-500 outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-400">Pick team:</label>
+          <select
+            value={selectedTeamId}
+            onChange={(e) => setSelectedTeamId(e.target.value)}
+            className="rounded-lg border border-white/10 bg-board-900 px-3 py-1.5 text-sm text-white outline-none focus:border-brandred-500"
+          >
+            <option value="">All Teams ({teams.length})</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.state || 'No State'})</option>
+            ))}
+          </select>
+        </div>
+      </Card>
+
       <p className="text-sm text-gray-400">
-        Edit each player's points — the team total (used for the leaderboard and the top-6 cut) updates automatically.
+        Pick a team to inspect or edit team details and members. Changes made by administrators are recorded in the audit log.
       </p>
-      {active.map((t) => {
+
+      {filteredTeams.map((t) => {
         const roster = players.filter((p) => p.teamId === t.id);
         const total = leaderboard.find((r) => r.id === t.id)?.total ?? 0;
         return (
           <Card key={t.id} className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/10 bg-board-900/50 px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-board-900/50 px-5 py-3">
               <div className="flex items-center gap-3">
                 <TeamMark name={t.name} logoUrl={t.logoUrl} size={36} />
                 <div>
@@ -99,12 +199,15 @@ function Scores({ teams, players, leaderboard }) {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
                 <span className="text-sm text-gray-400">Total <span className="font-mono text-base font-bold text-brandred-400">{fmtScore(total)}</span></span>
+                <Button size="sm" variant="outline" onClick={() => onEditTeam(t)}>
+                  <Edit className="h-3.5 w-3.5" /> Edit team & roster
+                </Button>
                 <button
-                  className="text-gray-500 hover:text-brandred-400"
+                  className="rounded p-1 text-gray-500 transition-colors hover:bg-brandred-500/20 hover:text-brandred-400"
                   title="Remove team"
-                  onClick={() => { if (confirm(`Delete team "${t.name}" and all its players & matches?`)) deleteTeam(t.id); }}
+                  onClick={() => handleDeleteTeam(t)}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -115,23 +218,98 @@ function Scores({ teams, players, leaderboard }) {
                 <div key={p.id} className="flex items-center justify-between px-5 py-2.5">
                   <span className="text-sm text-gray-200">
                     {p.displayName} {p.isCaptain && <span className="text-xs text-brandred-500">(captain)</span>}
+                    {p.phone && <span className="ml-2 text-xs text-gray-500">· {p.phone}</span>}
                   </span>
                   <input
                     type="number" step="0.5" min="0"
                     defaultValue={p.individualScore}
                     onBlur={(e) => {
                       const v = parseFloat(e.target.value) || 0;
-                      if (v !== p.individualScore) updatePlayer(p.id, { individualScore: v });
+                      handleScoreChange(p, v);
                     }}
                     className="w-24 rounded-lg border border-white/10 bg-board-900 px-3 py-1.5 text-right font-mono text-white outline-none focus:border-brandred-500"
                   />
                 </div>
               ))}
-              {!roster.length && <div className="px-5 py-3 text-sm text-gray-500">No players.</div>}
+              {!roster.length && <div className="px-5 py-3 text-sm text-gray-500">No players on this team. Click "Edit team & roster" to add members.</div>}
             </div>
           </Card>
         );
       })}
+
+      {!filteredTeams.length && (
+        <Card className="p-8 text-center text-sm text-gray-400">
+          No teams match your search or filter.
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ── Audit Logs View ───────────────────────────────────────────────────── */
+function AuditLogsView() {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchLogs = async () => {
+    setLoading(true);
+    const data = await listAuditLogs();
+    setLogs(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-medium text-white">Administrator Audit Trail</h3>
+          <p className="text-xs text-gray-400">
+            Records of team and member modifications performed by admins on coaches' behalf.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={fetchLogs}>
+          <RefreshCw className="h-3.5 w-3.5" /> Refresh logs
+        </Button>
+      </div>
+
+      {loading ? (
+        <Card className="p-8 text-center text-sm text-gray-400">Loading audit trail…</Card>
+      ) : !logs.length ? (
+        <Card className="p-8 text-center text-sm text-gray-400">
+          No administrator actions recorded yet. Admin modifications to teams and members will appear here.
+        </Card>
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="divide-y divide-white/5">
+            {logs.map((log) => {
+              const dateStr = log.timestamp || log.createdAt;
+              const formattedDate = dateStr ? new Date(dateStr).toLocaleString() : 'Just now';
+              return (
+                <div key={log.id} className="p-4 text-sm hover:bg-white/[0.02]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-brandred-500/20 px-2 py-0.5 text-xs font-semibold text-brandred-400 uppercase">
+                        {log.action}
+                      </span>
+                      <span className="font-medium text-white">{log.targetName || log.targetId}</span>
+                      <span className="text-xs text-gray-500">({log.targetType})</span>
+                    </div>
+                    <span className="text-xs text-gray-500">{formattedDate}</span>
+                  </div>
+                  <p className="mt-1.5 text-xs text-gray-300">{log.details}</p>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    Modified by: <span className="text-gray-400">{log.adminName ? `${log.adminName} (${log.adminEmail})` : log.adminEmail}</span>
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
