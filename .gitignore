@@ -12,8 +12,7 @@ dist
 dist-ssr
 *.local
 
-# Amplify backend artifacts
-amplify_outputs.json
+# Amplify backend artifacts (amplify_outputs.json is tracked so Vercel builds succeed)
 .amplify/
 amplifyconfiguration.json
 
