@@ -42,6 +42,8 @@ const schema = a.schema({
       round: a.integer().default(1),
       joinCode: a.string().required(),
       coachId: a.string(),
+      coachName: a.string(),
+      coachEmail: a.string(),
       state: a.string(),
       players: a.hasMany('Player', 'teamId'),
     })

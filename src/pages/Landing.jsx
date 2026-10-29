@@ -105,7 +105,8 @@ export default function Landing() {
             </p>
             <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
               <Button to="/register" size="lg">Register your team <ArrowRight className="h-4 w-4" /></Button>
-              <Button to={leaderboardLive ? '/leaderboard' : '/matches'} size="lg" variant="outline">
+              <Button to="/demo" size="lg" variant="outline">Live match demo</Button>
+              <Button to={leaderboardLive ? '/leaderboard' : '/matches'} size="lg" variant="ghost">
                 {leaderboardLive ? 'View leaderboard' : 'View the schedule'}
               </Button>
             </div>
@@ -201,15 +202,20 @@ export default function Landing() {
         <Card className="relative overflow-hidden bg-board-grid p-8 sm:p-12">
           <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-brandred-500/10 blur-3xl" />
           <div className="relative max-w-2xl">
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-brandred-400">The team scoring rule</span>
-            <h2 className="mt-3 text-3xl font-semibold text-white">Scores count by team, ranked by zone</h2>
+            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-brandred-400">Team Structure & Nationals Qualification</span>
+            <h2 className="mt-3 text-3xl font-semibold text-white">Scores count by team, distributed by zone</h2>
             <p className="mt-4 text-gray-300">
-              Every team member’s points are added together into one team score. Teams compete only within
-              their <span className="font-semibold text-brandred-400">geopolitical zone</span>, and when a
-              round ends the <span className="font-semibold text-brandred-400">top {winnersPerZone} of each zone</span> advance — so the
-              number moving on depends on how many zones are in play.
+              Teams require <strong className="text-white">2 to 5 members</strong> plus <strong className="text-brandred-400">exactly one coach</strong> (counted separately).
+              Every member’s points sum into the team total.
             </p>
-            <Button to="/register" className="mt-6">Register your team <ArrowRight className="h-4 w-4" /></Button>
+            <p className="mt-2 text-sm text-gray-400">
+              <strong>Nationals Advancement:</strong> If total registrations are under 200, <em>every registered team advances</em>.
+              If registrations reach 200 or more, exactly <em>100 teams qualify</em>, distributed across zones based on performance deterministically.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Button to="/register">Register your team <ArrowRight className="h-4 w-4" /></Button>
+              <Button to="/demo" variant="outline">Try Live Match Demo</Button>
+            </div>
           </div>
         </Card>
       </section>

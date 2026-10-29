@@ -54,16 +54,17 @@ const RAW = [
   team('knights', 'Royal Knights', 'coach1', 'Lagos', [['Ada Okeke', 0, true], ['Tunde Bello', 0], ['Ngozi Eze', 0], ['Sami Yusuf', 0]]),
   team('rooks', 'Iron Rooks', 'coach1', 'Kano', [['Chidi Obi', 0, true], ['Fatima Sani', 0], ['Emeka Nwosu', 0], ['Lola Adeyemi', 0]]),
   team('bishops', 'Diagonal Bishops', 'coach1', 'Kaduna', [['Kemi Ade', 0, true], ['John Paul', 0], ['Zainab Musa', 0], ['Peter Eze', 0]]),
-  team('queens', 'Queen Gambit', null, 'Enugu', [['Nneka Ali', 0, true], ['Yusuf Garba', 0], ['Bisi Alabi', 0], ['Tariq Bala', 0]]),
-  team('castle', 'Castle Guard', null, 'Anambra', [['Mary Joseph', 0, true], ['Femi Cole', 0], ['Hauwa Idris', 0], ['Obi Kalu', 0]]),
-  team('opening', 'Opening Theory', null, 'Oyo', [['Bola Tinu', 0, true], ['Kunle Aro', 0], ['Esther Pius', 0], ['Sani Dauda', 0]]),
+  team('queens', 'Queen Gambit', 'coach2', 'Enugu', [['Nneka Ali', 0, true], ['Yusuf Garba', 0], ['Bisi Alabi', 0], ['Tariq Bala', 0]]),
+  team('castle', 'Castle Guard', 'coach3', 'Anambra', [['Mary Joseph', 0, true], ['Femi Cole', 0], ['Hauwa Idris', 0], ['Obi Kalu', 0]]),
+  team('opening', 'Opening Theory', 'coach4', 'Oyo', [['Bola Tinu', 0, true], ['Kunle Aro', 0], ['Esther Pius', 0], ['Sani Dauda', 0]]),
 ];
 
 export const SAMPLE_TEAMS = RAW.map((r) => r.team);
 export const SAMPLE_PLAYERS = RAW.flatMap((r) => r.players);
 
-SAMPLE_TEAMS.push({ id: 'newcomers', name: 'Rising Pawns', status: 'active', round: 1, state: 'Lagos', joinCode: 'RISING24', logoUrl: '', coachId: null, createdAt: '2026-06-20T14:30:00.000Z' });
+SAMPLE_TEAMS.push({ id: 'newcomers', name: 'Rising Pawns', status: 'active', round: 1, state: 'Lagos', joinCode: 'RISING24', logoUrl: '', coachId: 'coach1', coachName: 'Coach Emeka', coachEmail: 'coach@coderina.org', createdAt: '2026-06-20T14:30:00.000Z' });
 SAMPLE_PLAYERS.push({ id: 'p101', teamId: 'newcomers', displayName: 'Victor Hart', email: 'victor@example.com', individualScore: 0, isCaptain: true });
+SAMPLE_PLAYERS.push({ id: 'p102', teamId: 'newcomers', displayName: 'Grace Danjuma', email: 'grace@example.com', individualScore: 0, isCaptain: false });
 
 // Team fixtures — WITHIN each zone (teams only play their own zone).
 export const SAMPLE_MATCHES = [

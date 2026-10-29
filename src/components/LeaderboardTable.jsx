@@ -59,7 +59,7 @@ export default function LeaderboardTable({ rows, advanceCount = 6, compact = fal
                       {t.rank === 1 && <Crown className="h-4 w-4 text-brandred-400" />}
                     </div>
                     {t.advancing && (
-                      <span className="text-xs text-brandred-500">Advancing</span>
+                      <span className="text-xs font-semibold text-emerald-400">Nationals Qualifier</span>
                     )}
                   </div>
                 </div>

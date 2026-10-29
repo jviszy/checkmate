@@ -18,7 +18,8 @@ import {
   fetchUserAttributes,
 } from 'aws-amplify/auth';
 import {
-  findUser, createUser, createPlayer, createTeam, getTeamByJoinCode,
+  findUser, createUser, createPlayer, createTeam, getTeamByJoinCode, listPlayersByTeam,
+  validateTeamLimits, MAX_TEAM_MEMBERS,
 } from '../lib/api.js';
 
 const AuthContext = createContext(null);
@@ -110,20 +111,69 @@ export function AuthProvider({ children }) {
     return session;
   }, []);
 
-  // Captain registers a brand new team — goes live immediately.
-  const registerCaptain = useCallback(async ({ email, password, displayName, teamName, state }) => {
+  // Captain registers a brand new team — enforces exactly 1 coach and 2 to 5 members.
+  const registerCaptain = useCallback(async ({
+    email, password, displayName, teamName, state,
+    coachName, coachEmail, coachPhone = '',
+    additionalMembers = [],
+  }) => {
+    // Member count = Captain (1) + additional members
+    const allMembers = [
+      { displayName, email, isCaptain: true },
+      ...additionalMembers.map((m) => ({ displayName: m.displayName || m.name, email: m.email, isCaptain: false })),
+    ];
+
+    const coach = {
+      name: (coachName || '').trim(),
+      email: (coachEmail || '').trim().toLowerCase(),
+      phone: (coachPhone || '').trim(),
+    };
+
+    // Back-end validation for coach and member boundaries
+    validateTeamLimits({ coach, members: allMembers });
+
     await signUpAndSignIn(email, password);
-    const team = await createTeam({ name: teamName, state });
+
+    const team = await createTeam({
+      name: teamName,
+      state,
+      coachName: coach.name,
+      coachEmail: coach.email,
+      coachId: `coach_${Math.random().toString(36).slice(2, 8)}`,
+      members: allMembers,
+    });
+
     const player = await createPlayer({ teamId: team.id, displayName, email, isCaptain: true });
+
+    // Create additional roster members
+    for (const m of additionalMembers) {
+      if (m.displayName && m.email) {
+        await createPlayer({
+          teamId: team.id,
+          displayName: m.displayName.trim(),
+          email: m.email.trim().toLowerCase(),
+          isCaptain: false,
+        });
+      }
+    }
+
     await createUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
     setUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
     return { team, player };
   }, []);
 
   // Member joins an existing team with its join code.
+  // Validates that team has not exceeded the 5-member ceiling.
   const registerMember = useCallback(async ({ email, password, displayName, joinCode }) => {
     const team = await getTeamByJoinCode(joinCode);
     if (!team) throw new Error('No team found for that join code.');
+
+    // Enforce 5-member maximum limit before account creation
+    const existingPlayers = await listPlayersByTeam(team.id);
+    if (existingPlayers.length >= MAX_TEAM_MEMBERS) {
+      throw new Error(`Cannot join team: Team "${team.name}" already has reached the maximum allowed limit of ${MAX_TEAM_MEMBERS} members (excluding the coach).`);
+    }
+
     await signUpAndSignIn(email, password);
     const player = await createPlayer({ teamId: team.id, displayName, email, isCaptain: false });
     await createUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });

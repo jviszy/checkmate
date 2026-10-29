@@ -98,7 +98,38 @@ export async function updateTournament(patch) {
   return after(updated);
 }
 
-// ── Teams ────────────────────────────────────────────────────────────────---
+// ── Team limits & validation rules ──────────────────────────────────────────
+export const MIN_TEAM_MEMBERS = 2;
+export const MAX_TEAM_MEMBERS = 5;
+export const REQUIRED_COACHES = 1;
+
+/**
+ * Validates team registration size (2-5 members) and coach requirement (exactly 1 coach).
+ * Counts the coach separately from the member count.
+ * Throws descriptive error messages if limits are violated.
+ */
+export function validateTeamLimits({ coach, members, existingCount = 0 }) {
+  const hasCoach = !!(
+    coach &&
+    (coach.id || coach.coachId || coach.name || coach.displayName || coach.email)
+  );
+
+  if (!hasCoach) {
+    throw new Error('Every team registration requires exactly one coach. The coach is counted separately from the member count.');
+  }
+
+  const count = Array.isArray(members) ? members.length : existingCount;
+  if (count < MIN_TEAM_MEMBERS) {
+    throw new Error(`Teams must have a minimum of ${MIN_TEAM_MEMBERS} members (excluding the coach). Current roster has ${count} member${count === 1 ? '' : 's'}.`);
+  }
+  if (count > MAX_TEAM_MEMBERS) {
+    throw new Error(`Teams cannot exceed a maximum of ${MAX_TEAM_MEMBERS} members (excluding the coach). Current roster has ${count} members.`);
+  }
+
+  return true;
+}
+
+// ── Teams ───────────────────────────────────────────────────────────────────
 export const listTeams = () => listAll('Team');
 export async function getTeam(id) {
   return unwrap(await client.models.Team.get({ id }, PUB)) || null;
@@ -111,13 +142,75 @@ export async function getTeamByJoinCode(code) {
   return rows[0] ?? null;
 }
 
-export async function createTeam({ name, logoUrl = '', coachId = null, status = 'active', state = '' }) {
+export async function createTeam({
+  name,
+  logoUrl = '',
+  coachId = null,
+  coachName = '',
+  coachEmail = '',
+  status = 'active',
+  state = '',
+  members = null,
+}) {
+  // Validate coach requirement on every registration
+  if (!coachId && !coachName && !coachEmail) {
+    throw new Error('Every team registration requires exactly one coach. The coach is counted separately from the member count.');
+  }
+
+  // If initial members list provided, enforce 2 to 5 member boundaries
+  if (members !== null && Array.isArray(members)) {
+    if (members.length < MIN_TEAM_MEMBERS) {
+      throw new Error(`Teams must have a minimum of ${MIN_TEAM_MEMBERS} members (excluding the coach). Provided: ${members.length}.`);
+    }
+    if (members.length > MAX_TEAM_MEMBERS) {
+      throw new Error(`Teams cannot exceed a maximum of ${MAX_TEAM_MEMBERS} members (excluding the coach). Provided: ${members.length}.`);
+    }
+  }
+
   let round = 1;
   try { round = (await getTournament())?.currentRound ?? 1; } catch { /* default */ }
   const team = unwrap(await client.models.Team.create({
-    name, logoUrl, status, coachId, state, round, joinCode: genJoinCode(),
+    name,
+    logoUrl,
+    status,
+    coachId: coachId || `coach_${Math.random().toString(36).slice(2, 8)}`,
+    coachName: coachName || undefined,
+    coachEmail: coachEmail || undefined,
+    state,
+    round,
+    joinCode: genJoinCode(),
   }));
   return after(team);
+}
+
+export async function createTeamWithRoster({ teamName, state, logoUrl = '', coach, members = [] }) {
+  validateTeamLimits({ coach, members });
+
+  const team = await createTeam({
+    name: teamName,
+    state,
+    logoUrl,
+    coachId: coach.coachId || coach.id || `coach_${Math.random().toString(36).slice(2, 8)}`,
+    coachName: coach.name || coach.displayName || '',
+    coachEmail: coach.email || '',
+    status: 'active',
+    members,
+  });
+
+  const createdPlayers = [];
+  for (const m of members) {
+    const player = await createPlayer({
+      teamId: team.id,
+      displayName: m.displayName || m.name,
+      email: m.email,
+      phone: m.phone || '',
+      isCaptain: !!m.isCaptain,
+      individualScore: m.individualScore || 0,
+    });
+    createdPlayers.push(player);
+  }
+
+  return { team, coach, players: createdPlayers };
 }
 
 export async function updateTeam(id, patch) {
@@ -152,6 +245,12 @@ export async function getPlayer(id) {
 }
 
 export async function createPlayer({ teamId, displayName, email, phone = '', isCaptain = false, individualScore = 0 }) {
+  if (teamId) {
+    const existing = await listPlayersByTeam(teamId);
+    if (existing.length >= MAX_TEAM_MEMBERS) {
+      throw new Error(`Cannot add member: Team already has the maximum allowed limit of ${MAX_TEAM_MEMBERS} members (excluding the coach).`);
+    }
+  }
   const player = unwrap(await client.models.Player.create({
     teamId, displayName, email, ...(phone ? { phone } : {}), isCaptain, individualScore,
   }));
@@ -163,6 +262,13 @@ export async function updatePlayer(id, patch) {
 }
 
 export async function deletePlayer(id) {
+  const p = await getPlayer(id);
+  if (p?.teamId) {
+    const existing = await listPlayersByTeam(p.teamId);
+    if (existing.length <= MIN_TEAM_MEMBERS) {
+      throw new Error(`Cannot remove member: Teams must maintain a minimum of ${MIN_TEAM_MEMBERS} members (excluding the coach).`);
+    }
+  }
   // Also clean up any scheduled games involving this player
   const games = await listAll('Game', {
     filter: { or: [{ whitePlayerId: { eq: id } }, { blackPlayerId: { eq: id } }] }

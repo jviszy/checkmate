@@ -108,6 +108,10 @@ export default function TeamEditorModal({ team, players, onClose, isAdmin = fals
     const score = parseFloat(newPlayerScore) || 0;
 
     // Validation
+    if (roster.length >= 5) {
+      setAddError('Cannot add member: Teams cannot exceed a maximum of 5 members (excluding the coach).');
+      return;
+    }
     if (!name) {
       setAddError('Player full name is required.');
       return;
@@ -251,6 +255,10 @@ export default function TeamEditorModal({ team, players, onClose, isAdmin = fals
 
   // ── Delete player ─────────────────────────────────────────────────────────
   const handleDeletePlayer = async (player) => {
+    if (roster.length <= 2) {
+      setActionError('Cannot remove member: Teams must maintain a minimum of 2 members (excluding the coach).');
+      return;
+    }
     if (!confirm(`Are you sure you want to remove "${player.displayName}" from ${team.name}?`)) {
       return;
     }
@@ -369,11 +377,20 @@ export default function TeamEditorModal({ team, players, onClose, isAdmin = fals
 
         {/* ── Section 2: Team Members & Roster ──────────────────────────── */}
         <div className="mb-8">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
-              Team Members ({roster.length})
-            </h3>
-            <span className="text-xs text-gray-500">Edit, remove or assign captain</span>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+                Team Members ({roster.length}/5)
+              </h3>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                roster.length >= 2 && roster.length <= 5 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-brandred-500/20 text-brandred-400'
+              }`}>
+                Min 2 · Max 5
+              </span>
+            </div>
+            <span className="text-xs text-gray-400">
+              Coach: <strong className="text-white">{team.coachName || team.coachEmail || team.coachId || 'Assigned'}</strong> (Counted separately)
+            </span>
           </div>
 
           {editError && (
@@ -567,10 +584,14 @@ export default function TeamEditorModal({ team, players, onClose, isAdmin = fals
                 Mark as Captain
               </label>
 
-              <Button size="sm" as="button" type="submit" disabled={addingPlayer}>
-                <Plus className="h-3.5 w-3.5" /> {addingPlayer ? 'Adding…' : 'Add member'}
+              <Button size="sm" as="button" type="submit" disabled={addingPlayer || roster.length >= 5}>
+                <Plus className="h-3.5 w-3.5" /> {addingPlayer ? 'Adding…' : roster.length >= 5 ? 'Team Full (5/5)' : 'Add member'}
               </Button>
             </div>
+
+            {roster.length >= 5 && (
+              <p className="mt-1 text-xs text-amber-400">Team has reached the maximum allowed limit of 5 members.</p>
+            )}
 
             {addError && (
               <p className="mt-1 text-xs text-brandred-400">{addError}</p>

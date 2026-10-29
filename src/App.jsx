@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Coach from './pages/Coach.jsx';
 import Admin from './pages/Admin.jsx';
 import Play from './pages/Play.jsx';
+import DemoMatch from './pages/DemoMatch.jsx';
 import Account from './pages/Account.jsx';
 import NotFound from './pages/NotFound.jsx';
 
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/matches" element={<Matches />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/demo" element={<DemoMatch />} />
         <Route path="/login" element={<Login />} />
         <Route path="/play/:gameId" element={<Play />} />
         <Route

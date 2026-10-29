@@ -16,6 +16,7 @@ export default function Navbar() {
   const links = [
     { to: '/', label: 'Home', end: true },
     { to: '/matches', label: 'Matches' },
+    { to: '/demo', label: 'Match Demo' },
     ...(leaderboardLive ? [{ to: '/leaderboard', label: 'Leaderboard' }] : []),
   ];
 

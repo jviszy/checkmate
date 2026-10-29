@@ -33,10 +33,35 @@ export default function Leaderboard() {
     <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
       <SectionTitle
         eyebrow={`${tournament?.name || 'Checkmate'} · Round ${tournament?.currentRound ?? 1}`}
-        title="Zone standings"
-        subtitle={`Teams compete within their geopolitical zone. The top ${winnersPerZone} of each zone advance — ${advancing} team${advancing !== 1 ? 's' : ''} across ${zones.length} zone${zones.length !== 1 ? 's' : ''}.`}
+        title="Zone Standings & Nationals Qualification"
+        subtitle={
+          leaderboard.length < 200
+            ? `Under 200 team registrations (${leaderboard.length} registered) — every registered team advances to the Nationals.`
+            : `200+ team registrations (${leaderboard.length} registered) — exactly 100 teams qualify for the Nationals, distributed across zones based on performance.`
+        }
         className="mb-10"
       />
+
+      {/* Nationals Qualification Rule Indicator Card */}
+      <Card className="mb-8 p-5 border-brandred-500/30 bg-board-900/80">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="font-semibold text-white">Nationals Qualification Rule: </span>
+            {leaderboard.length < 200 ? (
+              <span className="text-gray-300">
+                Under 200 registered teams (<strong className="text-white">{leaderboard.length}</strong> total) — <strong className="text-emerald-400">every registered team advances</strong>.
+              </span>
+            ) : (
+              <span className="text-gray-300">
+                200 or more registered teams (<strong className="text-white">{leaderboard.length}</strong> total) — <strong className="text-brandred-400">top 100 teams qualify</strong> distributed across zones based on performance.
+              </span>
+            )}
+          </div>
+          <span className="rounded-full bg-emerald-500/20 px-3 py-1 font-mono text-xs font-bold text-emerald-400">
+            {advancing} Qualifiers
+          </span>
+        </div>
+      </Card>
 
       <div className="space-y-10">
         {zones.map(({ zone, rows }) => (
@@ -51,16 +76,17 @@ export default function Leaderboard() {
             {/* Show zone rank in the table by mapping rank → zoneRank */}
             <LeaderboardTable
               rows={rows.map((r) => ({ ...r, rank: r.zoneRank }))}
-              advanceCount={winnersPerZone}
+              advanceCount={rows.filter((r) => r.advancing || r.nationalsQualified).length}
             />
           </div>
         ))}
       </div>
 
       <Card className="mt-8 p-5 text-sm text-gray-400">
-        <span className="font-medium text-brandred-400">How it works:</span> each team’s score is the total
-        of its members’ points. Teams are grouped into their state’s geopolitical zone and only play within
-        that zone. The top {winnersPerZone} of every zone advance to the next round.
+        <span className="font-medium text-brandred-400">Competition & Qualification Rules:</span> Every team requires
+        exactly 1 coach and 2 to 5 members (coach counted separately). Scores are calculated per team by summing all members' individual points.
+        For Nationals qualification: If total registrations are under 200, all registered teams advance; if 200 or more, exactly 100 teams qualify,
+        distributed across zones based on performance deterministically.
       </Card>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Trash2, Swords, Settings, Users, Flag, RefreshCw, Save, Play, Edit, Shield, ClipboardList, Search } from 'lucide-react';
+import { Trash2, Swords, Settings, Users, Flag, RefreshCw, Save, Play, Edit, ClipboardList, Search, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, Button, StatusPill, TeamMark } from '../components/ui.jsx';
 import TeamEditorModal from '../components/TeamEditorModal.jsx';
@@ -13,7 +13,7 @@ import {
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
 import { fmtScore, teamName } from '../lib/format.js';
 import { STATES, zoneOfTeam } from '../lib/zones.js';
-import { groupByZone, totalAdvancing } from '../lib/scoring.js';
+import { evaluateNationalsQualification, generateAuditSimulationTeams } from '../lib/scoring.js';
 
 const TABS = [
   { id: 'scores', label: 'Teams & Scores', icon: Users },
@@ -72,7 +72,7 @@ export default function Admin() {
         />
       )}
       {tab === 'matches' && <MatchesAdmin teams={teams} players={players} matches={matches} games={games} tournament={tournament} />}
-      {tab === 'round' && <RoundControl teams={teams} leaderboard={leaderboard} tournament={tournament} />}
+      {tab === 'round' && <RoundControl teams={teams} players={players} leaderboard={leaderboard} tournament={tournament} currentUser={user} />}
       {tab === 'logs' && <AuditLogsView />}
 
       {editingTeam && (
@@ -464,25 +464,70 @@ function GameRow({ game, teams, players }) {
   );
 }
 
-/* ── Round control ─────────────────────────────────────────────────────── */
-function RoundControl({ teams, leaderboard, tournament }) {
+/* ── Round control & Nationals Qualification ─────────────────────────────── */
+function RoundControl({ teams, players, leaderboard, tournament, currentUser }) {
   const [name, setName] = useState(tournament?.name ?? '');
   const [winnersPerZone, setWinnersPerZone] = useState(tournament?.winnersPerZone ?? 1);
+  const [showSim, setShowSim] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applySuccess, setApplySuccess] = useState('');
 
-  const zones = groupByZone(leaderboard);
-  const advancingRows = leaderboard.filter((r) => r.advancing);
-  const advancingIds = advancingRows.map((r) => r.id);
-  const totalAdv = totalAdvancing(leaderboard, tournament?.winnersPerZone ?? 1);
+  // Evaluate Nationals qualification on actual live data
+  const liveNationals = useMemo(
+    () => evaluateNationalsQualification(teams, players),
+    [teams, players]
+  );
 
-  const advance = async () => {
-    if (!advancingIds.length) return alert('No standings yet — play some games first.');
-    if (!confirm(`Advance the top ${tournament?.winnersPerZone ?? 1} of each zone (${advancingIds.length} team(s)) and eliminate the rest? Moves to round ${(tournament.currentRound ?? 1) + 1}.`)) return;
-    await Promise.all(
-      leaderboard.map((r) =>
-        updateTeam(r.id, { status: advancingIds.includes(r.id) ? 'advanced' : 'eliminated' })
-      )
-    );
-    await updateTournament({ currentRound: (tournament.currentRound ?? 1) + 1 });
+  // Evaluate Nationals qualification on simulated 200+ dataset for testing/auditing
+  const simData = useMemo(() => generateAuditSimulationTeams(220), []);
+  const simNationals = useMemo(
+    () => evaluateNationalsQualification(simData.teams, simData.players),
+    [simData]
+  );
+
+  const activeResult = showSim ? simNationals : liveNationals;
+
+  const handleApplyNationals = async () => {
+    if (!teams.length) return alert('No teams registered yet.');
+    const confirmMsg = liveNationals.is200OrMore
+      ? `Apply Nationals Qualification rule for 200+ teams? Only the top 100 teams (${liveNationals.actualQualifyingCount} qualified across ${liveNationals.zoneBreakdown.length} zones based on performance) will advance. Remaining teams will be marked eliminated.`
+      : `Apply Nationals Qualification rule for under 200 teams? All ${teams.length} registered teams will advance to the Nationals.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    setApplying(true);
+    try {
+      const qualifyingIds = liveNationals.qualifyingTeamIds;
+      await Promise.all(
+        teams.map((t) =>
+          updateTeam(t.id, { status: qualifyingIds.has(t.id) ? 'advanced' : 'eliminated' })
+        )
+      );
+
+      // Record in Audit Log
+      if (currentUser) {
+        const zoneDetails = liveNationals.zoneBreakdown
+          .map((z) => `${z.zone}: ${z.allocatedSpots} spots (${z.teamsRegistered} teams, ${z.performanceScore} pts)`)
+          .join('; ');
+
+        await createAuditLog({
+          adminEmail: currentUser.email,
+          adminName: currentUser.displayName || currentUser.email,
+          action: 'NATIONALS_QUALIFICATION_RULE_EVALUATED',
+          targetType: 'team',
+          targetId: liveNationals.ruleApplied,
+          targetName: liveNationals.ruleTitle,
+          details: `Evaluated ${liveNationals.ruleTitle}. Total registrations = ${teams.length} (${liveNationals.is200OrMore ? '>= 200 case' : '< 200 case'}). Qualified = ${liveNationals.actualQualifyingCount} teams. Zone allocations: ${zoneDetails}`,
+        });
+      }
+
+      setApplySuccess(`Nationals qualification applied successfully! (${liveNationals.actualQualifyingCount} teams advanced, recorded in Audit Log).`);
+      setTimeout(() => setApplySuccess(''), 6000);
+    } catch (err) {
+      alert(`Failed to apply qualification: ${err.message}`);
+    } finally {
+      setApplying(false);
+    }
   };
 
   const saveConfig = () =>
@@ -491,52 +536,197 @@ function RoundControl({ teams, leaderboard, tournament }) {
   const eliminated = teams.filter((t) => t.status === 'eliminated');
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <Card className="p-6">
-        <h3 className="font-medium text-white">Competition settings</h3>
-        <label className="mt-4 block text-sm">
-          <span className="mb-1 block text-gray-400">Competition name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500" />
-        </label>
-        <label className="mt-4 block text-sm">
-          <span className="mb-1 block text-gray-400">Winners that advance per zone</span>
-          <input type="number" min="1" value={winnersPerZone} onChange={(e) => setWinnersPerZone(e.target.value)}
-            className="w-32 rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500" />
-        </label>
-        <p className="mt-2 text-xs text-gray-500">
-          Total advancing = winners per zone × zones in play (currently {totalAdv} across {zones.length} zone(s)).
-        </p>
-        <Button className="mt-5" onClick={saveConfig}><Save className="h-4 w-4" /> Save settings</Button>
-      </Card>
-
-      <Card className="p-6">
-        <h3 className="font-medium text-white">Advance round</h3>
-        <p className="mt-2 text-sm text-gray-400">
-          Promote the top <span className="font-semibold text-brandred-400">{tournament?.winnersPerZone ?? 1}</span> of
-          each zone and eliminate the rest.
-        </p>
-        <div className="mt-4 space-y-3">
-          {zones.map(({ zone, rows }) => (
-            <div key={zone}>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">{zone}</div>
-              {rows.filter((r) => r.advancing).map((r) => (
-                <div key={r.id} className="flex items-center justify-between rounded-lg bg-brandred-500/[0.06] px-3 py-1.5 text-sm">
-                  <span className="text-gray-200">#{r.zoneRank} {r.name}</span>
-                  <span className="font-mono text-brandred-400">{fmtScore(r.total)}</span>
-                </div>
-              ))}
+    <div className="space-y-6">
+      {/* ── Section: Nationals Qualification Rule (Core Change 3) ──────── */}
+      <Card className="p-6 border-brandred-500/30 bg-board-900/90 shadow-xl">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-brandred-500/20 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-brandred-400">
+                Rule Evaluation
+              </span>
+              <span className="text-xs text-gray-400">Deterministic Merit & Zone Apportionment</span>
             </div>
-          ))}
-          {!zones.length && <p className="text-sm text-gray-500">No standings yet.</p>}
+            <h2 className="mt-1 text-2xl font-bold text-white">Nationals Qualification Engine</h2>
+            <p className="mt-1 text-sm text-gray-300">
+              Official Rule: If total team registrations are <strong>under 200</strong>, every registered team advances.
+              If total registrations reach <strong>200 or more</strong> (including exactly 200), only <strong>100 teams qualify</strong>,
+              distributed across zones based on performance.
+            </p>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              size="sm"
+              variant={showSim ? 'secondary' : 'outline'}
+              onClick={() => setShowSim(!showSim)}
+            >
+              {showSim ? '← Back to Live Data' : '🧪 Audit 200+ Teams Simulation'}
+            </Button>
+          </div>
         </div>
-        <Button variant="danger" className="mt-5" onClick={advance}>
-          <Flag className="h-4 w-4" /> Advance zone winners → Round {(tournament?.currentRound ?? 1) + 1}
-        </Button>
-        {eliminated.length > 0 && (
-          <p className="mt-3 text-xs text-gray-500">{eliminated.length} team(s) eliminated so far.</p>
+
+        {/* Rule Status Callout */}
+        <div className="mt-5 rounded-xl border border-white/10 bg-board-950/70 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs uppercase tracking-wider text-gray-400">Rule Applied:</span>
+                <span className="font-mono text-sm font-bold text-brandred-400">
+                  {activeResult.ruleApplied}
+                </span>
+                <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-white">
+                  {activeResult.is200OrMore ? 'Threshold ≥ 200 Met' : 'Under 200 Teams'}
+                </span>
+              </div>
+              <p className="text-sm font-medium text-white">{activeResult.ruleTitle}</p>
+              <p className="text-xs text-gray-400">{activeResult.ruleDescription}</p>
+            </div>
+
+            <div className="flex items-center gap-6 border-t border-white/10 pt-3 sm:border-t-0 sm:pt-0">
+              <div className="text-center">
+                <span className="block text-xs uppercase tracking-wider text-gray-400">Registrations</span>
+                <span className="font-mono text-2xl font-bold text-white">{activeResult.totalRegistrations}</span>
+              </div>
+              <div className="text-center">
+                <span className="block text-xs uppercase tracking-wider text-gray-400">Qualifying Places</span>
+                <span className="font-mono text-2xl font-bold text-emerald-400">{activeResult.actualQualifyingCount}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {showSim && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+            ⚠️ <strong>Viewing Simulation Mode:</strong> Evaluating 220 simulated teams across all 6 geopolitical zones.
+            Notice how the 100 places are distributed across zones based on aggregate zone performance points via Hamilton-Hare largest remainder method.
+          </div>
+        )}
+
+        {/* Zone Apportionment Breakdown Table */}
+        <div className="mt-6">
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-300">
+            Zone Apportionment & Performance Breakdown
+          </h3>
+          <div className="overflow-x-auto rounded-xl border border-white/10 bg-board-950/40">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-white/10 bg-board-900/80 text-xs font-semibold uppercase text-gray-400">
+                <tr>
+                  <th className="px-4 py-3">Geopolitical Zone</th>
+                  <th className="px-4 py-3 text-center">Registered Teams</th>
+                  <th className="px-4 py-3 text-center">Performance Points</th>
+                  <th className="px-4 py-3 text-center">Base Quota</th>
+                  <th className="px-4 py-3 text-center">Merit Quota</th>
+                  <th className="px-4 py-3 text-center">Nationals Places</th>
+                  <th className="px-4 py-3">Advance Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 font-mono text-xs text-gray-200">
+                {activeResult.zoneBreakdown.map((z) => (
+                  <tr key={z.zone} className="hover:bg-white/[0.02]">
+                    <td className="px-4 py-3 font-sans font-semibold text-white">{z.zone}</td>
+                    <td className="px-4 py-3 text-center">{z.teamsRegistered}</td>
+                    <td className="px-4 py-3 text-center font-bold text-brandred-400">{fmtScore(z.performanceScore)}</td>
+                    <td className="px-4 py-3 text-center text-gray-400">{z.baseSpots}</td>
+                    <td className="px-4 py-3 text-center text-gray-400">+{z.meritSpots}</td>
+                    <td className="px-4 py-3 text-center font-bold text-emerald-400">{z.allocatedSpots}</td>
+                    <td className="px-4 py-3 font-sans">
+                      <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                        Top {z.allocatedSpots} of {z.teamsRegistered} qualify
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="border-t border-white/10 bg-board-900/60 font-mono text-xs font-bold text-white">
+                <tr>
+                  <td className="px-4 py-3 font-sans">Total Nationals Allocation</td>
+                  <td className="px-4 py-3 text-center">{activeResult.totalRegistrations}</td>
+                  <td className="px-4 py-3 text-center text-brandred-400">
+                    {fmtScore(activeResult.zoneBreakdown.reduce((s, z) => s + z.performanceScore, 0))}
+                  </td>
+                  <td className="px-4 py-3 text-center text-gray-400">
+                    {activeResult.zoneBreakdown.reduce((s, z) => s + z.baseSpots, 0)}
+                  </td>
+                  <td className="px-4 py-3 text-center text-gray-400">
+                    +{activeResult.zoneBreakdown.reduce((s, z) => s + z.meritSpots, 0)}
+                  </td>
+                  <td className="px-4 py-3 text-center text-emerald-400 text-sm">
+                    {activeResult.actualQualifyingCount}
+                  </td>
+                  <td className="px-4 py-3 font-sans text-xs text-gray-400">
+                    {activeResult.is200OrMore ? 'Capped at 100 teams' : '100% Advancing'}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        {/* Action button */}
+        {!showSim && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+            <p className="text-xs text-gray-400">
+              Applying qualification updates team statuses and creates a permanent entry in the <strong>Audit Log</strong>.
+            </p>
+            <Button
+              variant="danger"
+              onClick={handleApplyNationals}
+              disabled={applying || !teams.length}
+            >
+              <Flag className="h-4 w-4" /> {applying ? 'Applying…' : 'Apply & Record Qualification in Audit Log'}
+            </Button>
+          </div>
+        )}
+
+        {applySuccess && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg bg-emerald-500/10 p-3 text-sm text-emerald-400">
+            <Check className="h-4 w-4 shrink-0" /> {applySuccess}
+          </div>
         )}
       </Card>
+
+      {/* ── Section: Settings & Standings ─────────────────────────────── */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="p-6">
+          <h3 className="font-medium text-white">Competition Settings</h3>
+          <label className="mt-4 block text-sm">
+            <span className="mb-1 block text-gray-400">Competition name</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500"
+            />
+          </label>
+          <label className="mt-4 block text-sm">
+            <span className="mb-1 block text-gray-400">Winners that advance per zone (Round-robin baseline)</span>
+            <input
+              type="number"
+              min="1"
+              value={winnersPerZone}
+              onChange={(e) => setWinnersPerZone(e.target.value)}
+              className="w-32 rounded-lg border border-white/10 bg-board-900 px-3 py-2 text-white outline-none focus:border-brandred-500"
+            />
+          </label>
+          <Button className="mt-5" onClick={saveConfig}><Save className="h-4 w-4" /> Save settings</Button>
+        </Card>
+
+        <Card className="p-6">
+          <h3 className="font-medium text-white">Current Standings & Eliminations</h3>
+          <p className="mt-2 text-sm text-gray-400">
+            Teams currently active: <strong className="text-white">{teams.filter((t) => t.status !== 'eliminated').length}</strong>.
+            {eliminated.length > 0 && ` (${eliminated.length} eliminated so far).`}
+          </p>
+          <div className="mt-4 space-y-2 max-h-56 overflow-y-auto">
+            {leaderboard.slice(0, 8).map((r) => (
+              <div key={r.id} className="flex items-center justify-between rounded-lg bg-board-900/60 px-3 py-1.5 text-xs">
+                <span className="text-gray-200">#{r.rank} {r.name} ({r.zone})</span>
+                <span className="font-mono text-brandred-400">{fmtScore(r.total)} pts</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

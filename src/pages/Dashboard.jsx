@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Trophy, Users, Hash, TrendingUp, Crown, ShieldAlert, Star,
+  Trophy, Users, Hash, TrendingUp, Crown, ShieldAlert, Star, Sparkles,
 } from 'lucide-react';
 import { Card, StatusPill, TeamMark, Button } from '../components/ui.jsx';
 import GameCard from '../components/GameCard.jsx';
@@ -59,7 +59,43 @@ export default function Dashboard() {
             <p className="mt-1 text-sm text-gray-400">
               Welcome back, {user.displayName}. {team.state || '—'} · {zone} zone · Round {tournament?.currentRound ?? 1}.
             </p>
+            <p className="mt-0.5 text-xs text-gray-400">
+              Coach: <strong className="text-white">{team.coachName || team.coachEmail || '1 Coach assigned'}</strong> (counted separately) · Roster: <strong className="text-white">{roster.length}/5 members</strong>
+            </p>
           </div>
+        </div>
+
+        {/* Live Match Demo Button in Header */}
+        <div className="flex shrink-0 items-center gap-2">
+          <Button to="/demo" variant="outline" size="sm">
+            <Sparkles className="h-4 w-4 text-brandred-400" /> Live Match Demo
+          </Button>
+        </div>
+      </div>
+
+      {/* Live Match Demo Sandbox Banner */}
+      <div className="mt-6 rounded-xl border border-brandred-500/30 bg-gradient-to-r from-brandred-950/60 via-board-900 to-board-950 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-brandred-500/20 p-2 text-brandred-400">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-brandred-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brandred-400">
+                  Demo Sandbox
+                </span>
+                <span className="text-xs text-gray-400">Non-Competitive Match Experience</span>
+              </div>
+              <h3 className="text-sm font-semibold text-white">Live Match Demo on the Portal</h3>
+              <p className="text-xs text-gray-300">
+                Explore how live chess matches work: 10-minute clocks, tap-to-move, and tactical hints in a safe sandbox that won't affect rankings.
+              </p>
+            </div>
+          </div>
+          <Button to="/demo" size="sm" variant="outline" className="shrink-0">
+            Launch Demo Match
+          </Button>
         </div>
       </div>
 
@@ -67,21 +103,43 @@ export default function Dashboard() {
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat icon={Hash} label="Zone rank" value={zoneRank === '—' ? '—' : `#${zoneRank}`} />
         <Stat icon={TrendingUp} label="Team score" value={fmtScore(total)} />
-        <Stat icon={Users} label="Players" value={roster.length} />
+        <Stat icon={Users} label="Roster size" value={`${roster.length}/5`} />
         <Stat
           icon={advancing ? Crown : Trophy}
-          label="Advancing"
-          value={advancing ? 'Yes' : 'Not yet'}
+          label="Nationals Qualifier"
+          value={advancing ? 'Qualified' : 'Pending'}
           accent={advancing}
         />
       </div>
 
-      {!advancing && zoneRank !== '—' && (
-        <Card className="mt-4 p-4 text-sm text-gray-300">
-          You're <span className="font-semibold text-white">#{zoneRank}</span> in the {zone} zone. The top
-          {' '}{winnersPerZone} advance{winnersPerZone === 1 ? 's' : ''} — keep stacking points to take your zone.
-        </Card>
-      )}
+      {/* Nationals Qualification Status Banner */}
+      <Card className="mt-4 p-4 text-xs sm:text-sm text-gray-300">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="font-semibold text-white">Nationals Qualification Rule: </span>
+            {teams.length < 200 ? (
+              <span>
+                Total registrations ({teams.length}) is under 200 — <strong className="text-emerald-400">every registered team advances to the Nationals</strong>.
+              </span>
+            ) : (
+              <span>
+                Total registrations ({teams.length}) is 200 or more — <strong className="text-brandred-400">only 100 teams qualify for the Nationals</strong>, distributed across zones based on performance.
+              </span>
+            )}
+          </div>
+          <div className="shrink-0">
+            {advancing ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-semibold text-emerald-400 text-xs">
+                <Crown className="h-3.5 w-3.5" /> Advancing to Nationals
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2.5 py-0.5 font-semibold text-amber-300 text-xs">
+                Zone Rank #{zoneRank}
+              </span>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-5">
         {/* Team leaderboard — members ranked by their contribution */}
