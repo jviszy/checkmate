@@ -7,6 +7,8 @@ import Leaderboard from './pages/Leaderboard.jsx';
 import Matches from './pages/Matches.jsx';
 import Register from './pages/Register.jsx';
 import Login from './pages/Login.jsx';
+import ForgotPassword from './pages/ForgotPassword.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Coach from './pages/Coach.jsx';
 import Admin from './pages/Admin.jsx';
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/demo" element={<DemoMatch />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/play/:gameId" element={<Play />} />
         <Route
           path="/dashboard"

@@ -18,6 +18,7 @@ export const NATIONALS_CAP = 100;
 export const NATIONALS_RULES = {
   UNDER_200: 'RULE_UNDER_200_ALL_ADVANCE',
   AT_LEAST_200: 'RULE_200_PLUS_TOP_100_ZONE_MERIT',
+  LOW_REGISTRATION_ALL_ADVANCE: 'RULE_LOW_REGISTRATION_ALL_ADVANCE',
 };
 
 /** Sum a team's members' individual scores into the team total. */
@@ -31,26 +32,34 @@ export function maxMemberScore(players) {
 }
 
 /**
- * Deterministic evaluation of Nationals qualification based on total registrations.
- *
- * Rule 1 (under 200 teams): Every registered team advances to the nationals.
- * Rule 2 (200 or more teams): Exactly 100 teams qualify, distributed across zones
- * based on performance deterministically.
+ * Cuts a team's members down to strictly at most 5 members.
+ * Preserves captains first, followed by members with the highest individual scores.
+ */
+export function getEffectiveTeamMembers(teamId, players) {
+  const members = players.filter((p) => p.teamId === teamId);
+  if (members.length <= 5) return members;
+  return [...members].sort((a, b) => (
+    (b.isCaptain ? 1 : 0) - (a.isCaptain ? 1 : 0) ||
+    (Number(b.individualScore) || 0) - (Number(a.individualScore) || 0) ||
+    String(a.displayName || '').localeCompare(String(b.displayName || '')) ||
+    String(a.id).localeCompare(String(b.id))
+  )).slice(0, 5);
+}
+
+/**
+ * Item 10: Because of low registration, all registered teams advance to nationals.
+ * Mark every team as qualified for nationals and make sure the bracket and advancement logic
+ * reflects this without requiring normal qualification results.
  */
 export function evaluateNationalsQualification(teams = [], players = []) {
   const totalRegistered = teams.length;
-  const is200OrMore = totalRegistered >= NATIONALS_THRESHOLD;
-  const ruleApplied = is200OrMore ? NATIONALS_RULES.AT_LEAST_200 : NATIONALS_RULES.UNDER_200;
-  const ruleTitle = is200OrMore
-    ? '200+ Registrations — Top 100 Zone Performance Distribution'
-    : 'Under 200 Registrations — Full Advancement';
-  const ruleDescription = is200OrMore
-    ? `Total registrations (${totalRegistered}) reached 200 or more (treated as the 200+ case). Exactly 100 qualifying places are distributed across zones based on performance.`
-    : `Total registrations (${totalRegistered}) is under 200. Every registered team advances to the nationals.`;
+  const ruleApplied = NATIONALS_RULES.LOW_REGISTRATION_ALL_ADVANCE;
+  const ruleTitle = 'All Registered Teams Advance to Nationals';
+  const ruleDescription = 'Because of low registration, all registered teams advance to nationals directly without requiring normal qualification results.';
 
   // Compute team performance metrics
   const teamsWithScores = teams.map((t) => {
-    const teamPlayers = players.filter((p) => p.teamId === t.id);
+    const teamPlayers = getEffectiveTeamMembers(t.id, players);
     const total = teamTotal(teamPlayers);
     const maxScore = maxMemberScore(teamPlayers);
     const zone = zoneOfTeam(t);
@@ -60,6 +69,8 @@ export function evaluateNationalsQualification(teams = [], players = []) {
       total,
       maxScore,
       memberCount: teamPlayers.length,
+      nationalsQualified: true,
+      advancing: true,
     };
   });
 
@@ -69,166 +80,45 @@ export function evaluateNationalsQualification(teams = [], players = []) {
     (zoneMap[t.zone] ||= []).push(t);
   }
 
-  // Sort teams within each zone deterministically:
-  // 1. Team total score DESC
-  // 2. Max member individual score DESC
-  // 3. Team name ASC
-  // 4. Team id ASC
-  for (const zone of Object.keys(zoneMap)) {
-    zoneMap[zone].sort((a, b) => (
-      b.total - a.total ||
-      b.maxScore - a.maxScore ||
-      a.name.localeCompare(b.name) ||
-      String(a.id).localeCompare(String(b.id))
-    ));
-  }
-
-  const activeZones = Object.keys(zoneMap);
   const qualifyingTeamIds = new Set();
   const zoneBreakdown = [];
 
-  if (!is200OrMore) {
-    // Under 200: Every registered team advances
-    for (const [zone, zTeams] of Object.entries(zoneMap)) {
-      const perfScore = zTeams.reduce((s, t) => s + t.total, 0);
-      zTeams.forEach((t) => qualifyingTeamIds.add(t.id));
-      zoneBreakdown.push({
-        zone,
-        teamsRegistered: zTeams.length,
-        performanceScore: perfScore,
-        baseSpots: zTeams.length,
-        meritSpots: 0,
-        allocatedSpots: zTeams.length,
-        qualifiedTeamIds: zTeams.map((t) => t.id),
-      });
-    }
-  } else {
-    // 200 or more: Exactly 100 places distributed across zones based on performance
-    const targetQualifiers = Math.min(NATIONALS_CAP, totalRegistered);
-    const numZones = activeZones.length;
-
-    // Step 1: Base representation to guarantee distribution across zones
-    // Each active zone gets up to 5 base places (or all their teams if < 5)
-    const BASE_PER_ZONE = numZones > 0 ? Math.min(5, Math.floor(targetQualifiers / (numZones * 2)) || 1) : 0;
-    const zoneBase = {};
-    let totalBaseAllocated = 0;
-
-    for (const zone of activeZones) {
-      const count = zoneMap[zone].length;
-      const base = Math.min(count, BASE_PER_ZONE);
-      zoneBase[zone] = base;
-      totalBaseAllocated += base;
-    }
-
-    // Step 2: Proportional performance merit quota for remaining spots
-    const remainingMeritSpots = Math.max(0, targetQualifiers - totalBaseAllocated);
-    const zonePerformance = {};
-    let totalNationalPerformance = 0;
-
-    for (const zone of activeZones) {
-      const perf = zoneMap[zone].reduce((s, t) => s + t.total, 0);
-      zonePerformance[zone] = perf;
-      totalNationalPerformance += perf;
-    }
-
-    const zoneMerit = {};
-    const zoneRemainders = [];
-
-    for (const zone of activeZones) {
-      const count = zoneMap[zone].length;
-      const capacityRemaining = count - zoneBase[zone];
-      if (capacityRemaining <= 0) {
-        zoneMerit[zone] = 0;
-        continue;
-      }
-
-      // If no games played yet (total points = 0), distribute proportionally to team registrations
-      const share = totalNationalPerformance > 0
-        ? (zonePerformance[zone] / totalNationalPerformance)
-        : (count / totalRegistered);
-
-      const exactQuota = share * remainingMeritSpots;
-      const integerPart = Math.min(capacityRemaining, Math.floor(exactQuota));
-      const remainder = exactQuota - Math.floor(exactQuota);
-
-      zoneMerit[zone] = integerPart;
-      zoneRemainders.push({
-        zone,
-        remainder,
-        performance: zonePerformance[zone],
-        capacityRemaining: capacityRemaining - integerPart,
-      });
-    }
-
-    let allocatedSpots = totalBaseAllocated + Object.values(zoneMerit).reduce((a, b) => a + b, 0);
-
-    // Step 3: Hamilton-Hare Largest Remainder Method for unallocated spots
-    // Order by remainder DESC, then zone performance DESC, then zone name ASC
-    zoneRemainders.sort((a, b) => (
-      b.remainder - a.remainder ||
-      b.performance - a.performance ||
-      a.zone.localeCompare(b.zone)
-    ));
-
-    for (const entry of zoneRemainders) {
-      if (allocatedSpots >= targetQualifiers) break;
-      if (entry.capacityRemaining > 0) {
-        zoneMerit[entry.zone] = (zoneMerit[entry.zone] || 0) + 1;
-        entry.capacityRemaining -= 1;
-        allocatedSpots += 1;
-      }
-    }
-
-    // Step 4: Fallback if capacity constraints left any spots open
-    if (allocatedSpots < targetQualifiers) {
-      for (const zone of activeZones) {
-        const canTake = zoneMap[zone].length - (zoneBase[zone] + (zoneMerit[zone] || 0));
-        const toAdd = Math.min(canTake, targetQualifiers - allocatedSpots);
-        if (toAdd > 0) {
-          zoneMerit[zone] = (zoneMerit[zone] || 0) + toAdd;
-          allocatedSpots += toAdd;
-        }
-        if (allocatedSpots >= targetQualifiers) break;
-      }
-    }
-
-    // Assign qualifying teams per zone
-    for (const zone of activeZones) {
-      const spotsForZone = zoneBase[zone] + (zoneMerit[zone] || 0);
-      const qualified = zoneMap[zone].slice(0, spotsForZone);
-      qualified.forEach((t) => qualifyingTeamIds.add(t.id));
-
-      zoneBreakdown.push({
-        zone,
-        teamsRegistered: zoneMap[zone].length,
-        performanceScore: zonePerformance[zone] || 0,
-        baseSpots: zoneBase[zone],
-        meritSpots: zoneMerit[zone] || 0,
-        allocatedSpots: spotsForZone,
-        qualifiedTeamIds: qualified.map((t) => t.id),
-      });
-    }
+  // Every single registered team advances to nationals
+  for (const [zone, zTeams] of Object.entries(zoneMap)) {
+    const perfScore = zTeams.reduce((s, t) => s + t.total, 0);
+    zTeams.forEach((t) => qualifyingTeamIds.add(t.id));
+    zoneBreakdown.push({
+      zone,
+      teamsRegistered: zTeams.length,
+      performanceScore: perfScore,
+      baseSpots: zTeams.length,
+      meritSpots: 0,
+      allocatedSpots: zTeams.length,
+      qualifiedTeamIds: zTeams.map((t) => t.id),
+    });
   }
 
-  // Audit metadata payload
+  // Handle case when no zones exist yet
+  teams.forEach((t) => qualifyingTeamIds.add(t.id));
+
   const auditSummary = {
     evaluatedAt: new Date().toISOString(),
     totalRegistrations: totalRegistered,
     ruleApplied,
     ruleTitle,
     ruleDescription,
-    qualifyingTarget: is200OrMore ? NATIONALS_CAP : totalRegistered,
+    qualifyingTarget: totalRegistered,
     actualQualifyingCount: qualifyingTeamIds.size,
     zoneBreakdown,
   };
 
   return {
-    is200OrMore,
+    is200OrMore: false,
     ruleApplied,
     ruleTitle,
     ruleDescription,
     totalRegistrations: totalRegistered,
-    qualifyingTarget: is200OrMore ? NATIONALS_CAP : totalRegistered,
+    qualifyingTarget: totalRegistered,
     actualQualifyingCount: qualifyingTeamIds.size,
     qualifyingTeamIds,
     zoneBreakdown,
@@ -255,7 +145,7 @@ export function buildLeaderboard(teams, players, winnersPerZone = 1) {
   const nationalsEval = evaluateNationalsQualification(active, players);
 
   const rows = active.map((t) => {
-    const members = players.filter((p) => p.teamId === t.id);
+    const members = getEffectiveTeamMembers(t.id, players);
     const total = teamTotal(members);
     const isQualified = nationalsEval.qualifyingTeamIds.has(t.id);
     return {

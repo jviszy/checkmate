@@ -21,6 +21,13 @@ import {
   findUser, createUser, createPlayer, createTeam, getTeamByJoinCode, listPlayersByTeam,
   validateTeamLimits, MAX_TEAM_MEMBERS,
 } from '../lib/api.js';
+import {
+  isRegistrationOpen,
+  getRegistrationDeadlineText,
+  isEmailExemptTeam,
+  makePendingEmailPlaceholder,
+} from '../lib/tournamentConfig.js';
+import { sendRegistrationConfirmation } from '../lib/notifications.js';
 
 const AuthContext = createContext(null);
 
@@ -117,10 +124,25 @@ export function AuthProvider({ children }) {
     coachName, coachEmail, coachPhone = '',
     additionalMembers = [],
   }) => {
+    // Item 4: Registration cutoff check
+    if (!isRegistrationOpen()) {
+      throw new Error(`Registration closed on ${getRegistrationDeadlineText()}. New registrations are no longer accepted.`);
+    }
+
+    const isExempt = isEmailExemptTeam(teamName);
+
     // Member count = Captain (1) + additional members
     const allMembers = [
-      { displayName, email, isCaptain: true },
-      ...additionalMembers.map((m) => ({ displayName: m.displayName || m.name, email: m.email, isCaptain: false })),
+      {
+        displayName,
+        email: email || (isExempt ? makePendingEmailPlaceholder(displayName, teamName) : ''),
+        isCaptain: true,
+      },
+      ...additionalMembers.map((m) => ({
+        displayName: m.displayName || m.name,
+        email: m.email || (isExempt ? makePendingEmailPlaceholder(m.displayName || m.name, teamName) : ''),
+        isCaptain: false,
+      })),
     ];
 
     const coach = {
@@ -130,9 +152,12 @@ export function AuthProvider({ children }) {
     };
 
     // Back-end validation for coach and member boundaries
-    validateTeamLimits({ coach, members: allMembers });
+    validateTeamLimits({ coach, members: allMembers, teamName });
 
-    await signUpAndSignIn(email, password);
+    // For exempt team without player email, create account with coach credential if email not given or is placeholder
+    const isPlaceholderEmail = typeof email === 'string' && email.startsWith('[');
+    const loginEmail = (isExempt && isPlaceholderEmail) ? coach.email : (email || coach.email);
+    await signUpAndSignIn(loginEmail, password);
 
     const team = await createTeam({
       name: teamName,
@@ -143,28 +168,50 @@ export function AuthProvider({ children }) {
       members: allMembers,
     });
 
-    const player = await createPlayer({ teamId: team.id, displayName, email, isCaptain: true });
+    const captainPlayerEmail = email || (isExempt ? makePendingEmailPlaceholder(displayName, teamName) : '');
+    const player = await createPlayer({ teamId: team.id, displayName, email: captainPlayerEmail, isCaptain: true });
 
     // Create additional roster members
+    const createdPlayers = [player];
     for (const m of additionalMembers) {
-      if (m.displayName && m.email) {
-        await createPlayer({
+      if (m.displayName) {
+        const mEmail = m.email || (isExempt ? makePendingEmailPlaceholder(m.displayName, teamName) : '');
+        const p = await createPlayer({
           teamId: team.id,
           displayName: m.displayName.trim(),
-          email: m.email.trim().toLowerCase(),
+          email: mEmail,
           isCaptain: false,
         });
+        createdPlayers.push(p);
       }
     }
 
-    await createUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
-    setUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
+    await createUser({ email: loginEmail, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
+    setUser({ email: loginEmail, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
+
+    // Item 7: Send confirmation notification to registration email
+    if (coach.email) {
+      sendRegistrationConfirmation({
+        to: coach.email,
+        teamName: team.name,
+        coachName: coach.name,
+        captainName: displayName,
+        joinCode: team.joinCode,
+        members: createdPlayers,
+      }).catch((err) => console.warn('Failed to send confirmation email', err));
+    }
+
     return { team, player };
   }, []);
 
   // Member joins an existing team with its join code.
   // Validates that team has not exceeded the 5-member ceiling.
   const registerMember = useCallback(async ({ email, password, displayName, joinCode }) => {
+    // Item 4: Registration cutoff check
+    if (!isRegistrationOpen()) {
+      throw new Error(`Registration closed on ${getRegistrationDeadlineText()}. New registrations are no longer accepted.`);
+    }
+
     const team = await getTeamByJoinCode(joinCode);
     if (!team) throw new Error('No team found for that join code.');
 
@@ -183,6 +230,11 @@ export function AuthProvider({ children }) {
 
   // Coach registers — gets their own coachId and manages teams from /coach.
   const registerCoach = useCallback(async ({ email, password, displayName }) => {
+    // Item 4: Registration cutoff check
+    if (!isRegistrationOpen()) {
+      throw new Error(`Registration closed on ${getRegistrationDeadlineText()}. New registrations are no longer accepted.`);
+    }
+
     await signUpAndSignIn(email, password);
     const coachId = `coach_${Math.random().toString(36).slice(2, 9)}`;
     await createUser({ email, displayName, role: 'coach', playerId: null, teamId: null, coachId });

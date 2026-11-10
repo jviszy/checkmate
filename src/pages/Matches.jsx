@@ -8,13 +8,34 @@ import { useAuth } from '../context/AuthContext.jsx';
 export default function Matches() {
   const { games, teams, players, tournament } = useCheckmate();
   const { user } = useAuth();
+
+  // Item 8: Admins view all matches. Coaches view limited to matches involving their own players.
+  const myCoachTeams = useMemo(() => {
+    if (user?.role !== 'coach') return [];
+    return teams.filter((t) => t.coachId === user.coachId);
+  }, [teams, user]);
+
+  const myCoachTeamIds = useMemo(() => {
+    return new Set(myCoachTeams.map((t) => t.id));
+  }, [myCoachTeams]);
+
+  const visibleGames = useMemo(() => {
+    if (!user) return games;
+    if (user.role === 'admin') return games; // Admin sees all matches
+    if (user.role === 'coach') {
+      // Coach sees only matches involving their own players
+      return games.filter((g) => myCoachTeamIds.has(g.whiteTeamId) || myCoachTeamIds.has(g.blackTeamId));
+    }
+    return games;
+  }, [games, user, myCoachTeamIds]);
+
   const rounds = useMemo(
-    () => [...new Set(games.map((g) => g.round))].sort((a, b) => a - b),
-    [games]
+    () => [...new Set(visibleGames.map((g) => g.round))].sort((a, b) => a - b),
+    [visibleGames]
   );
   const [round, setRound] = useState('all');
 
-  const scoped = round === 'all' ? games : games.filter((g) => g.round === Number(round));
+  const scoped = round === 'all' ? visibleGames : visibleGames.filter((g) => g.round === Number(round));
   const live = scoped.filter((g) => g.status === 'live');
   const upcoming = scoped.filter((g) => g.status === 'scheduled');
   const done = scoped.filter((g) => g.status === 'completed')
@@ -35,13 +56,21 @@ export default function Matches() {
       <SectionTitle
         eyebrow={`${tournament?.name || 'Checkmate'} · Games`}
         title="Matches"
-        subtitle="Chess games are played right here on the board. Watch live, or play your own."
+        subtitle={
+          user?.role === 'coach'
+            ? 'Coach view: Showing matches involving your team\'s players only.'
+            : user?.role === 'admin'
+            ? 'Administrator view: Full oversight of all competition matches across all rounds.'
+            : 'Chess games are played right here on the board. Watch live, or play your own.'
+        }
         className="mb-8"
       />
 
-      {empty ? (
+      {visibleGames.length === 0 ? (
         <Card className="p-12 text-center text-gray-400">
-          No games yet. Once teams register and organizers start the round, live boards appear here.
+          {user?.role === 'coach'
+            ? 'No matches involving your players have been scheduled or played yet.'
+            : 'No games yet. Once teams register and organizers start the round, live boards appear here.'}
         </Card>
       ) : (
         <>

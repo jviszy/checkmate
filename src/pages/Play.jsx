@@ -8,6 +8,7 @@ import { useCheckmate } from '../hooks/useCheckmate.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { updateGame, completeGame } from '../lib/api.js';
 import { teamById } from '../lib/format.js';
+import { isBotPlayer, isBotTeam } from '../lib/matchgen/tournamentPairing.js';
 
 const BOARD_DARK = '#6b1420';
 const BOARD_LIGHT = '#efe2cf';
@@ -77,6 +78,46 @@ export default function Play() {
       completeGame(game.id, turnColor === 'white' ? 'black' : 'white', { fen: game.fen, pgn: game.pgn });
     }
   }, [now, game, turnColor, canControl, liveMs]);
+
+  const isBotWhite = isBotPlayer(game?.whitePlayerId);
+  const isBotBlack = isBotPlayer(game?.blackPlayerId);
+  const isBotTurn = (turnColor === 'white' && isBotWhite) || (turnColor === 'black' && isBotBlack);
+
+  // Bot automated opponent move
+  useEffect(() => {
+    if (!game || game.status === 'completed' || !isBotTurn) return;
+    const timer = setTimeout(() => {
+      const probe = new Chess(game.fen);
+      const moves = probe.moves({ verbose: true });
+      if (!moves.length) return;
+      const score = (m) => {
+        let s = 0;
+        if (m.san.includes('#')) s += 1000;
+        if (m.captured) s += 10;
+        if (m.san.includes('+')) s += 3;
+        if (['d4', 'e4', 'd5', 'e5', 'c4'].includes(m.to)) s += 1;
+        return s;
+      };
+      const best = moves.slice().sort((a, b) => score(b) - score(a))[0];
+      if (best) {
+        const nextProbe = new Chess(game.fen);
+        nextProbe.move({ from: best.from, to: best.to, promotion: 'q' });
+        const clocks = {
+          whiteMs: game.whiteMs,
+          blackMs: game.blackMs,
+          lastMoveAt: new Date().toISOString(),
+        };
+        if (nextProbe.isGameOver()) {
+          let result = 'draw';
+          if (nextProbe.isCheckmate()) result = nextProbe.turn() === 'w' ? 'black' : 'white';
+          completeGame(game.id, result, { fen: nextProbe.fen(), pgn: nextProbe.pgn() });
+        } else {
+          updateGame(game.id, { fen: nextProbe.fen(), pgn: nextProbe.pgn(), status: 'live', ...clocks });
+        }
+      }
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [game?.fen, isBotTurn, game?.status, game?.id, game?.whiteMs, game?.blackMs]);
 
   // Apply a move (shared by drag + click). Returns true if legal.
   const applyMove = useCallback((from, to) => {
@@ -179,8 +220,8 @@ export default function Play() {
     );
   }
 
-  const whitePlayer = players.find((p) => p.id === game.whitePlayerId);
-  const blackPlayer = players.find((p) => p.id === game.blackPlayerId);
+  const whitePlayer = players.find((p) => p.id === game.whitePlayerId) || (isBotWhite ? { displayName: 'Checkmate Bot' } : null);
+  const blackPlayer = players.find((p) => p.id === game.blackPlayerId) || (isBotBlack ? { displayName: 'Checkmate Bot' } : null);
   const isSpectator = !myColor && !isAdmin && !coachControls;
   const orientation = myColor === 'black' ? 'black' : 'white';
   const canMoveNow = canControl(turnColor);

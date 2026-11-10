@@ -8,9 +8,10 @@ import { useAuth } from '../context/AuthContext.jsx';
 import {
   deleteTeam, updatePlayer, createMatches,
   deleteMatchesForRound, updateTournament, updateTeam, loadSampleData, clearData,
-  createGame, completeGame, listAuditLogs, createAuditLog,
+  createGame, completeGame, listAuditLogs, createAuditLog, reconcileTeamSizes,
 } from '../lib/api.js';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
+import { generateFullTournamentPairings } from '../lib/matchgen/tournamentPairing.js';
 import { fmtScore, teamName } from '../lib/format.js';
 import { STATES, zoneOfTeam } from '../lib/zones.js';
 import { evaluateNationalsQualification, generateAuditSimulationTeams } from '../lib/scoring.js';
@@ -91,6 +92,8 @@ export default function Admin() {
 function Scores({ teams, players, leaderboard, onEditTeam, currentUser }) {
   const [query, setQuery] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState('');
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState(null);
 
   const filteredTeams = useMemo(() => {
     let list = teams;
@@ -103,8 +106,6 @@ function Scores({ teams, players, leaderboard, onEditTeam, currentUser }) {
     }
     return list;
   }, [teams, selectedTeamId, query]);
-
-  if (!teams.length) return <Card className="p-10 text-center text-gray-400">No teams yet. Teams appear here as they register.</Card>;
 
   const handleScoreChange = async (p, newScore) => {
     if (newScore !== p.individualScore) {
@@ -125,8 +126,8 @@ function Scores({ teams, players, leaderboard, onEditTeam, currentUser }) {
   };
 
   const handleDeleteTeam = async (t) => {
-    if (confirm(`Delete team "${t.name}" and all its players & matches?`)) {
-      await deleteTeam(t.id);
+    if (confirm(`Delete team "${t.name}" and all its players & matches? This action is restricted to admins.`)) {
+      await deleteTeam(t.id, currentUser);
       if (currentUser) {
         await createAuditLog({
           adminEmail: currentUser.email,
@@ -141,8 +142,46 @@ function Scores({ teams, players, leaderboard, onEditTeam, currentUser }) {
     }
   };
 
+  const handleReconcile = async () => {
+    if (!confirm('Run one-time team size reconciliation? Teams with fewer than 2 players will be deleted, and teams with more than 5 players will have excess members removed. All actions will be logged in the Audit Log.')) return;
+    setReconciling(true);
+    setReconcileResult(null);
+    try {
+      const res = await reconcileTeamSizes(currentUser);
+      setReconcileResult(res);
+    } catch (err) {
+      alert(`Reconciliation error: ${err.message}`);
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
+      {/* Reconciliation action banner for Item 6 */}
+      <div className="flex flex-col gap-3 rounded-xl border border-brandred-500/20 bg-board-900/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Team Size Policy (Item 6)</h3>
+          <p className="text-xs text-gray-400">
+            Enforces 2 to 5 players per team. Teams with fewer than 2 players are deleted; teams with more than 5 players are trimmed.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleReconcile}
+          disabled={reconciling}
+        >
+          <Settings className="h-4 w-4" /> {reconciling ? 'Reconciling…' : 'Run team size reconciliation'}
+        </Button>
+      </div>
+
+      {reconcileResult && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs text-emerald-300">
+          <strong>Reconciliation complete:</strong> Removed {reconcileResult.deletedTeams.length} undersized team(s) and trimmed {reconcileResult.trimmedPlayers.length} excess player(s). All changes recorded in Audit Log.
+        </div>
+      )}
+
       {/* Team Picker & Filter Bar */}
       <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-1 items-center gap-2">
@@ -335,8 +374,24 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
   }, [activeTeams]);
   const playableZones = Object.entries(zoneGroups).filter(([, ts]) => ts.length >= 2);
 
-  // Generate a round-robin WITHIN each zone, plus a playable board (captains) per fixture.
+  // Generate pairings: 3-round automated pairing for all students (with bots) or round-robin
   const generate = async () => {
+    if (!activeTeams.length) return alert('No active teams registered to pair.');
+
+    if (format === 'tournament-all-students') {
+      if (!confirm('Generate automated 3-round pairings for all students (with Bot matches for unmatched players)? Every player will play 3 rounds (10 mins each) between 10:00 and 19:00 on Friday 13/11/2026.')) return;
+      for (let r = 1; r <= 3; r++) {
+        await deleteMatchesForRound(r);
+      }
+      const { matches: newMatches, games: newGames } = generateFullTournamentPairings(teams, players);
+      await createMatches(newMatches);
+      for (const g of newGames) {
+        await createGame(g);
+      }
+      alert(`Successfully generated 3 rounds: ${newMatches.length} matches and ${newGames.length} student games scheduled! Every player is paired with a student or bot.`);
+      return;
+    }
+
     if (!playableZones.length) return alert('Each zone needs at least 2 teams. Add more teams (or states) first.');
     const existing = matches.filter((m) => m.round === round);
     if (existing.length && !confirm(`Replace round ${round}'s ${existing.length} fixture(s) and their games?`)) return;

@@ -9,6 +9,13 @@ import { KingGlyph } from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { STATES, zoneOfState } from '../lib/zones.js';
 import { MIN_TEAM_MEMBERS, MAX_TEAM_MEMBERS } from '../lib/api.js';
+import {
+  isRegistrationOpen,
+  getRegistrationDeadlineText,
+  isEmailExemptTeam,
+  makePendingEmailPlaceholder,
+  EXEMPT_EMAIL_TEAM,
+} from '../lib/tournamentConfig.js';
 
 export default function Register() {
   const { registerCaptain, registerMember, registerCoach } = useAuth();
@@ -69,7 +76,14 @@ export default function Register() {
     setBusy(true);
 
     try {
+      // Item 4: Registration cutoff check
+      if (!isRegistrationOpen()) {
+        throw new Error(`Registration closed on ${getRegistrationDeadlineText()}. New submissions are rejected.`);
+      }
+
       if (mode === 'captain') {
+        const isExempt = isEmailExemptTeam(teamName);
+
         // ── Front-end form validation ───────────────────────────────────────
         if (!teamName.trim()) throw new Error('Please enter a team name.');
         if (!state) throw new Error('Please select your state.');
@@ -88,31 +102,38 @@ export default function Register() {
 
         // 2. Member validation: Minimum 2 members, Maximum 5 members
         if (!captainName.trim()) throw new Error('Team captain full name is required.');
-        if (!captainEmail.trim() || !emailRegex.test(captainEmail.trim())) {
-          throw new Error('Please enter a valid email address for the team captain.');
+        if (!isExempt) {
+          if (!captainEmail.trim() || !emailRegex.test(captainEmail.trim())) {
+            throw new Error('Please enter a valid email address for the team captain.');
+          }
         }
         if (!captainPassword || captainPassword.length < 6) {
           throw new Error('Captain account password must be at least 6 characters.');
         }
 
-        if (!member2.name.trim() || !member2.email.trim()) {
+        if (!member2.name.trim()) {
           throw new Error('Teams must have a minimum of 2 members, plus exactly one coach. Please provide details for Member 2.');
         }
-        if (!emailRegex.test(member2.email.trim())) {
-          throw new Error('Please enter a valid email address for Member 2.');
+        if (!isExempt) {
+          if (!member2.email.trim() || !emailRegex.test(member2.email.trim())) {
+            throw new Error('Please enter a valid email address for Member 2.');
+          }
         }
 
         const validExtraMembers = [];
         for (let i = 0; i < extraMembers.length; i++) {
           const em = extraMembers[i];
           const mNum = i + 3;
-          if (!em.name.trim() || !em.email.trim()) {
-            throw new Error(`Please fill in both name and email for Member ${mNum}, or remove the entry.`);
+          if (!em.name.trim()) {
+            throw new Error(`Please fill in a name for Member ${mNum}, or remove the entry.`);
           }
-          if (!emailRegex.test(em.email.trim())) {
-            throw new Error(`Please enter a valid email address for Member ${mNum}.`);
+          if (!isExempt) {
+            if (!em.email.trim() || !emailRegex.test(em.email.trim())) {
+              throw new Error(`Please enter a valid email address for Member ${mNum}.`);
+            }
           }
-          validExtraMembers.push({ displayName: em.name.trim(), email: em.email.trim().toLowerCase() });
+          const mEmail = em.email.trim().toLowerCase() || (isExempt ? makePendingEmailPlaceholder(em.name.trim(), teamName) : '');
+          validExtraMembers.push({ displayName: em.name.trim(), email: mEmail });
         }
 
         const allMemberCount = 1 + 1 + validExtraMembers.length;
@@ -123,25 +144,30 @@ export default function Register() {
           throw new Error(`Teams cannot exceed a maximum of ${MAX_TEAM_MEMBERS} members (excluding the coach). Currently: ${allMemberCount}.`);
         }
 
-        // Duplicate email check
-        const allEmails = [
-          coachEmail.trim().toLowerCase(),
-          captainEmail.trim().toLowerCase(),
-          member2.email.trim().toLowerCase(),
-          ...validExtraMembers.map((m) => m.email),
-        ];
-        const uniqueEmails = new Set(allEmails);
-        if (uniqueEmails.size !== allEmails.length) {
-          throw new Error('Each team member and coach must have a unique email address.');
+        // Duplicate email check for non-exempt registrations
+        if (!isExempt) {
+          const allEmails = [
+            coachEmail.trim().toLowerCase(),
+            captainEmail.trim().toLowerCase(),
+            member2.email.trim().toLowerCase(),
+            ...validExtraMembers.map((m) => m.email),
+          ];
+          const uniqueEmails = new Set(allEmails);
+          if (uniqueEmails.size !== allEmails.length) {
+            throw new Error('Each team member and coach must have a unique email address.');
+          }
         }
 
+        const captainFinalEmail = captainEmail.trim().toLowerCase() || (isExempt ? makePendingEmailPlaceholder(captainName.trim(), teamName) : '');
+        const member2FinalEmail = member2.email.trim().toLowerCase() || (isExempt ? makePendingEmailPlaceholder(member2.name.trim(), teamName) : '');
+
         const additionalMembers = [
-          { displayName: member2.name.trim(), email: member2.email.trim().toLowerCase() },
+          { displayName: member2.name.trim(), email: member2FinalEmail },
           ...validExtraMembers,
         ];
 
         const { team } = await registerCaptain({
-          email: captainEmail.trim().toLowerCase(),
+          email: captainFinalEmail,
           password: captainPassword,
           displayName: captainName.trim(),
           teamName: teamName.trim(),
@@ -158,6 +184,7 @@ export default function Register() {
           joinCode: team.joinCode,
           coachName: coachName.trim(),
           memberCount: allMemberCount,
+          isExempt,
         });
       } else if (mode === 'member') {
         if (!joinForm.displayName.trim()) throw new Error('Please enter your full name.');
@@ -280,6 +307,16 @@ export default function Register() {
         </p>
       </div>
 
+      {!isRegistrationOpen() && (
+        <div className="mb-8 rounded-2xl border border-brandred-500/50 bg-brandred-500/10 p-5 text-center">
+          <AlertCircle className="mx-auto h-8 w-8 text-brandred-400" />
+          <h3 className="mt-2 text-lg font-bold text-white">Registration Closed</h3>
+          <p className="mt-1 text-sm text-gray-300">
+            Registration closed on {getRegistrationDeadlineText()}. New team and member submissions are no longer accepted.
+          </p>
+        </div>
+      )}
+
       {/* Mode toggle */}
       <div className="mb-6 grid grid-cols-3 gap-2 rounded-xl border border-white/10 bg-board-900 p-1">
         <ToggleBtn active={mode === 'captain'} onClick={() => { setMode('captain'); setError(''); }} icon={Users}>
@@ -299,9 +336,39 @@ export default function Register() {
             <>
               {/* Team Information */}
               <div className="space-y-4">
-                <h3 className="border-b border-white/10 pb-2 text-sm font-semibold uppercase tracking-wider text-brandred-400">
-                  1. Team Details
-                </h3>
+                <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-brandred-400">
+                    1. Team Details
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTeamName(EXEMPT_EMAIL_TEAM.name);
+                      setState('Lagos');
+                      setCoachName(EXEMPT_EMAIL_TEAM.coach.name);
+                      setCoachEmail(EXEMPT_EMAIL_TEAM.coach.email);
+                      setCaptainName(EXEMPT_EMAIL_TEAM.players[0].displayName);
+                      setCaptainEmail('');
+                      setCaptainPassword('legend2026');
+                      setMember2({ name: EXEMPT_EMAIL_TEAM.players[1].displayName, email: '' });
+                      setExtraMembers(EXEMPT_EMAIL_TEAM.players.slice(2).map((p) => ({ name: p.displayName, email: '' })));
+                    }}
+                    className="text-xs text-brandred-400 hover:underline"
+                  >
+                    Fill "The Legend 1" exempt roster
+                  </button>
+                </div>
+
+                {isEmailExemptTeam(teamName) && (
+                  <div className="rounded-xl border border-brandred-500/30 bg-brandred-500/10 p-4 text-xs text-brandred-200">
+                    <div className="flex items-center gap-1.5 font-semibold text-brandred-400">
+                      <Sparkles className="h-4 w-4" /> Single Team Email Exemption
+                    </div>
+                    <p className="mt-1">
+                      Team "The Legend 1" is permitted to register without player email addresses. Coach email is required. Clearly marked placeholders will be recorded for later completion.
+                    </p>
+                  </div>
+                )}
                 <Field
                   label="Team name"
                   value={teamName}
@@ -398,7 +465,14 @@ export default function Register() {
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Captain full name" value={captainName} onChange={setCaptainName} required />
-                    <Field label="Captain email" type="email" value={captainEmail} onChange={setCaptainEmail} required />
+                    <Field
+                      label={`Captain email ${isEmailExemptTeam(teamName) ? '(optional for The Legend 1)' : ''}`}
+                      type="email"
+                      value={captainEmail}
+                      onChange={setCaptainEmail}
+                      required={!isEmailExemptTeam(teamName)}
+                      placeholder={isEmailExemptTeam(teamName) ? 'Placeholder will be assigned' : 'captain@example.com'}
+                    />
                   </div>
                   <Field
                     label="Account password (for captain sign-in)"
@@ -428,11 +502,12 @@ export default function Register() {
                       required
                     />
                     <Field
-                      label="Member 2 email"
+                      label={`Member 2 email ${isEmailExemptTeam(teamName) ? '(optional for The Legend 1)' : ''}`}
                       type="email"
                       value={member2.email}
                       onChange={(v) => setMember2({ ...member2, email: v })}
-                      required
+                      required={!isEmailExemptTeam(teamName)}
+                      placeholder={isEmailExemptTeam(teamName) ? 'Placeholder will be assigned' : 'member2@example.com'}
                     />
                   </div>
                 </div>
@@ -460,11 +535,12 @@ export default function Register() {
                         required
                       />
                       <Field
-                        label={`Member ${idx + 3} email`}
+                        label={`Member ${idx + 3} email ${isEmailExemptTeam(teamName) ? '(optional for The Legend 1)' : ''}`}
                         type="email"
                         value={em.email}
                         onChange={(v) => handleUpdateExtraMember(idx, 'email', v)}
-                        required
+                        required={!isEmailExemptTeam(teamName)}
+                        placeholder={isEmailExemptTeam(teamName) ? 'Placeholder will be assigned' : `member${idx + 3}@example.com`}
                       />
                     </div>
                   </div>
@@ -564,8 +640,8 @@ export default function Register() {
             </div>
           )}
 
-          <Button as="button" type="submit" className="w-full" disabled={busy}>
-            {busy ? 'Registering team…' : mode === 'captain' ? 'Register team' : mode === 'member' ? 'Join team' : 'Create coach account'}
+          <Button as="button" type="submit" className="w-full" disabled={busy || !isRegistrationOpen()}>
+            {!isRegistrationOpen() ? 'Registration Closed' : busy ? 'Registering team…' : mode === 'captain' ? 'Register team' : mode === 'member' ? 'Join team' : 'Create coach account'}
           </Button>
         </form>
 

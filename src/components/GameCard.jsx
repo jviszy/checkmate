@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Play, Eye, Circle } from 'lucide-react';
 import { TeamMark, StatusPill } from './ui.jsx';
-import { teamById } from '../lib/format.js';
+import { teamById, playerName } from '../lib/format.js';
 
 /**
  * A single playable board game. Links through to the live board at /play/:id.
@@ -10,8 +10,8 @@ import { teamById } from '../lib/format.js';
 export default function GameCard({ game, teams, players, canPlay = false }) {
   const white = teamById(teams, game.whiteTeamId);
   const black = teamById(teams, game.blackTeamId);
-  const wName = players?.find((p) => p.id === game.whitePlayerId)?.displayName;
-  const bName = players?.find((p) => p.id === game.blackPlayerId)?.displayName;
+  const wName = playerName(players, game.whitePlayerId);
+  const bName = playerName(players, game.blackPlayerId);
   const live = game.status === 'live';
   const done = game.status === 'completed';
 

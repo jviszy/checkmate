@@ -12,6 +12,13 @@
 
 import { client } from './amplify.js';
 import { INITIAL_FEN, SEED_TOURNAMENT, SAMPLE_TEAMS, SAMPLE_PLAYERS, SAMPLE_MATCHES, SAMPLE_GAMES } from './seed.js';
+import {
+  isRegistrationOpen,
+  getRegistrationDeadlineText,
+  isEmailExemptTeam,
+  makePendingEmailPlaceholder,
+} from './tournamentConfig.js';
+import { sendRegistrationConfirmation } from './notifications.js';
 
 // Public reads go through the API key; signed-in writes use the default (userPool).
 const PUB = { authMode: 'apiKey' };
@@ -108,7 +115,7 @@ export const REQUIRED_COACHES = 1;
  * Counts the coach separately from the member count.
  * Throws descriptive error messages if limits are violated.
  */
-export function validateTeamLimits({ coach, members, existingCount = 0 }) {
+export function validateTeamLimits({ coach, members, existingCount = 0, teamName = '' }) {
   const hasCoach = !!(
     coach &&
     (coach.id || coach.coachId || coach.name || coach.displayName || coach.email)
@@ -124,6 +131,20 @@ export function validateTeamLimits({ coach, members, existingCount = 0 }) {
   }
   if (count > MAX_TEAM_MEMBERS) {
     throw new Error(`Teams cannot exceed a maximum of ${MAX_TEAM_MEMBERS} members (excluding the coach). Current roster has ${count} members.`);
+  }
+
+  // Validate player emails unless this is the single exempt team ("The Legend 1")
+  if (Array.isArray(members)) {
+    const isExempt = isEmailExemptTeam(teamName);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
+      if (!isExempt) {
+        if (!m.email || !emailRegex.test(m.email.trim())) {
+          throw new Error(`Member ${i + 1} (${m.displayName || m.name || 'unnamed'}) requires a valid email address.`);
+        }
+      }
+    }
   }
 
   return true;
@@ -152,6 +173,11 @@ export async function createTeam({
   state = '',
   members = null,
 }) {
+  // Item 4: Registration cutoff check
+  if (!isRegistrationOpen()) {
+    throw new Error(`Registration closed on ${getRegistrationDeadlineText()}. New registrations are no longer accepted.`);
+  }
+
   // Validate coach requirement on every registration
   if (!coachId && !coachName && !coachEmail) {
     throw new Error('Every team registration requires exactly one coach. The coach is counted separately from the member count.');
@@ -184,7 +210,13 @@ export async function createTeam({
 }
 
 export async function createTeamWithRoster({ teamName, state, logoUrl = '', coach, members = [] }) {
-  validateTeamLimits({ coach, members });
+  // Item 4: Registration cutoff check
+  if (!isRegistrationOpen()) {
+    throw new Error(`Registration closed on ${getRegistrationDeadlineText()}. New registrations are no longer accepted.`);
+  }
+
+  validateTeamLimits({ coach, members, teamName });
+  const isExempt = isEmailExemptTeam(teamName);
 
   const team = await createTeam({
     name: teamName,
@@ -199,10 +231,15 @@ export async function createTeamWithRoster({ teamName, state, logoUrl = '', coac
 
   const createdPlayers = [];
   for (const m of members) {
+    let email = (m.email || '').trim().toLowerCase();
+    // Item 5: Exactly one team ("The Legend 1") may register without email; store clearly marked placeholder
+    if (!email && isExempt) {
+      email = makePendingEmailPlaceholder(m.displayName || m.name, teamName);
+    }
     const player = await createPlayer({
       teamId: team.id,
       displayName: m.displayName || m.name,
-      email: m.email,
+      email,
       phone: m.phone || '',
       isCaptain: !!m.isCaptain,
       individualScore: m.individualScore || 0,
@@ -210,30 +247,65 @@ export async function createTeamWithRoster({ teamName, state, logoUrl = '', coac
     createdPlayers.push(player);
   }
 
+  // Item 7: Send confirmation notification to team's registration email (coach email)
+  const confirmationEmail = coach.email || (isExempt ? null : members[0]?.email);
+  if (confirmationEmail) {
+    sendRegistrationConfirmation({
+      to: confirmationEmail,
+      teamName: team.name,
+      coachName: coach.name || coach.displayName,
+      captainName: createdPlayers.find((p) => p.isCaptain)?.displayName || createdPlayers[0]?.displayName,
+      joinCode: team.joinCode,
+      members: createdPlayers,
+    }).catch((err) => console.warn('Failed to send confirmation email', err));
+  }
+
   return { team, coach, players: createdPlayers };
 }
 
-export async function updateTeam(id, patch) {
+// Item 1: Restricted to admin role
+export async function updateTeam(id, patch, currentUser = null) {
+  if (currentUser && currentUser.role !== 'admin') {
+    throw new Error('Only administrators can edit team details.');
+  }
   return after(unwrap(await client.models.Team.update({ id, ...patch })));
 }
 
-export async function deleteTeam(id) {
-  const [players, matches, games] = await Promise.all([
+// Item 1: Restricted to admin role; removes team, members, related matches, and games
+export async function deleteTeam(id, currentUser = null) {
+  if (currentUser && currentUser.role !== 'admin') {
+    throw new Error('Only administrators can delete teams.');
+  }
+
+  const [players, allMatches, allGames] = await Promise.all([
     listAll('Player', { filter: { teamId: { eq: id } } }),
-    listAll('Match', { filter: { or: [{ teamAId: { eq: id } }, { teamBId: { eq: id } }] } }),
-    listAll('Game', { filter: { or: [{ whiteTeamId: { eq: id } }, { blackTeamId: { eq: id } }] } }),
+    listAll('Match'),
+    listAll('Game'),
   ]);
+
+  const targetMatches = allMatches.filter((m) => m.teamAId === id || m.teamBId === id);
+  const targetMatchIds = new Set(targetMatches.map((m) => m.id));
+  const playerIds = new Set(players.map((p) => p.id));
+
+  const targetGames = allGames.filter((g) => (
+    g.whiteTeamId === id ||
+    g.blackTeamId === id ||
+    targetMatchIds.has(g.matchId) ||
+    playerIds.has(g.whitePlayerId) ||
+    playerIds.has(g.blackPlayerId)
+  ));
+
   await Promise.all([
     ...players.map((p) => client.models.Player.delete({ id: p.id })),
-    ...matches.map((m) => client.models.Match.delete({ id: m.id })),
-    ...games.map((g) => client.models.Game.delete({ id: g.id })),
+    ...targetMatches.map((m) => client.models.Match.delete({ id: m.id })),
+    ...targetGames.map((g) => client.models.Game.delete({ id: g.id })),
   ]);
   await client.models.Team.delete({ id });
   return after(true);
 }
 
-export const approveTeam = (id) => updateTeam(id, { status: 'active' });
-export const rejectTeam = (id) => deleteTeam(id);
+export const approveTeam = (id, user) => updateTeam(id, { status: 'active' }, user);
+export const rejectTeam = (id, user) => deleteTeam(id, user);
 
 // ── Players ──────────────────────────────────────────────────────────────---
 export const listPlayers = () => listAll('Player');
@@ -276,6 +348,153 @@ export async function deletePlayer(id) {
   await Promise.all(games.filter((g) => g.status === 'scheduled').map((g) => client.models.Game.delete({ id: g.id })));
   await client.models.Player.delete({ id });
   return after(true);
+}
+
+/**
+ * Cuts any team that has more than 5 members down to only 5 members.
+ * Preserves captains first, followed by members with the highest individual scores.
+ * Permanently removes excess members from the database.
+ */
+export async function trimOversizedTeams() {
+  const allPlayers = await listPlayers();
+  const byTeam = {};
+  for (const p of allPlayers) {
+    if (p.teamId) {
+      (byTeam[p.teamId] ||= []).push(p);
+    }
+  }
+
+  let totalTrimmed = 0;
+  const details = [];
+
+  for (const [teamId, teamPlayers] of Object.entries(byTeam)) {
+    if (teamPlayers.length > MAX_TEAM_MEMBERS) {
+      // Prioritize captains, then highest individual score
+      const sorted = [...teamPlayers].sort((a, b) => {
+        if (a.isCaptain && !b.isCaptain) return -1;
+        if (!a.isCaptain && b.isCaptain) return 1;
+        return (
+          (Number(b.individualScore) || 0) - (Number(a.individualScore) || 0) ||
+          String(a.displayName || '').localeCompare(String(b.displayName || '')) ||
+          String(a.id).localeCompare(String(b.id))
+        );
+      });
+
+      const toKeep = sorted.slice(0, MAX_TEAM_MEMBERS);
+      const toRemove = sorted.slice(MAX_TEAM_MEMBERS);
+
+      for (const p of toRemove) {
+        try {
+          const games = await listAll('Game', {
+            filter: { or: [{ whitePlayerId: { eq: p.id } }, { blackPlayerId: { eq: p.id } }] }
+          });
+          await Promise.all(games.filter((g) => g.status === 'scheduled').map((g) => client.models.Game.delete({ id: g.id })));
+          await client.models.Player.delete({ id: p.id });
+          totalTrimmed++;
+        } catch (err) {
+          console.warn('Failed to delete excess player:', p.id, err);
+        }
+      }
+
+      details.push({
+        teamId,
+        kept: toKeep.map((p) => p.displayName),
+        removed: toRemove.map((p) => p.displayName),
+      });
+    }
+  }
+
+  if (totalTrimmed > 0) {
+    emit();
+  }
+
+  return { totalTrimmed, details };
+}
+
+/**
+ * Item 6: Enforce team size between 2 and 5 players.
+ * Teams with more than 5 players have extra members removed.
+ * Teams with fewer than 2 players are deleted.
+ * Runs as a one-time reconciliation over existing data and logs every removal and deletion.
+ */
+export async function reconcileTeamSizes(currentUser = null) {
+  const [allTeams, allPlayers] = await Promise.all([
+    listTeams(),
+    listPlayers(),
+  ]);
+
+  const playersByTeam = new Map();
+  for (const t of allTeams) {
+    playersByTeam.set(t.id, []);
+  }
+  for (const p of allPlayers) {
+    if (p.teamId && playersByTeam.has(p.teamId)) {
+      playersByTeam.get(p.teamId).push(p);
+    }
+  }
+
+  const deletedTeams = [];
+  const trimmedPlayers = [];
+
+  for (const team of allTeams) {
+    const roster = playersByTeam.get(team.id) || [];
+
+    // Teams with fewer than 2 players are deleted
+    if (roster.length < MIN_TEAM_MEMBERS) {
+      await deleteTeam(team.id, currentUser ? { role: 'admin' } : null);
+      deletedTeams.push({ teamId: team.id, teamName: team.name, count: roster.length });
+
+      await createAuditLog({
+        adminEmail: currentUser?.email || 'admin@coderina.org',
+        adminName: currentUser?.displayName || 'System Admin',
+        action: 'RECONCILIATION_DELETE_TEAM',
+        targetType: 'team',
+        targetId: team.id,
+        targetName: team.name,
+        details: `Deleted team "${team.name}" during size reconciliation because it had ${roster.length} member(s) (minimum ${MIN_TEAM_MEMBERS} required).`,
+      });
+      continue;
+    }
+
+    // Teams with more than 5 players have excess members removed
+    if (roster.length > MAX_TEAM_MEMBERS) {
+      // Prioritize captains, then highest individual score
+      const sorted = [...roster].sort((a, b) => {
+        if (a.isCaptain && !b.isCaptain) return -1;
+        if (!a.isCaptain && b.isCaptain) return 1;
+        return (
+          (Number(b.individualScore) || 0) - (Number(a.individualScore) || 0) ||
+          String(a.displayName || '').localeCompare(String(b.displayName || '')) ||
+          String(a.id).localeCompare(String(b.id))
+        );
+      });
+
+      const toRemove = sorted.slice(MAX_TEAM_MEMBERS);
+      for (const p of toRemove) {
+        // Clean up any scheduled games involving this player
+        const games = await listAll('Game', {
+          filter: { or: [{ whitePlayerId: { eq: p.id } }, { blackPlayerId: { eq: p.id } }] }
+        });
+        await Promise.all(games.filter((g) => g.status === 'scheduled').map((g) => client.models.Game.delete({ id: g.id })));
+        await client.models.Player.delete({ id: p.id });
+
+        trimmedPlayers.push({ playerId: p.id, displayName: p.displayName, teamId: team.id, teamName: team.name });
+
+        await createAuditLog({
+          adminEmail: currentUser?.email || 'admin@coderina.org',
+          adminName: currentUser?.displayName || 'System Admin',
+          action: 'RECONCILIATION_TRIM_PLAYER',
+          targetType: 'player',
+          targetId: p.id,
+          targetName: p.displayName,
+          details: `Removed excess player "${p.displayName}" from team "${team.name}" during size reconciliation (exceeded ${MAX_TEAM_MEMBERS} maximum).`,
+        });
+      }
+    }
+  }
+
+  emit();
+  return { deletedTeams, trimmedPlayers };
 }
 
 // ── Audit Logs (Admin changes) ──────────────────────────────────────────────
@@ -324,6 +543,28 @@ export async function createAuditLog({ adminEmail, adminName = '', action, targe
 // ── Matches (team fixtures) ─────────────────────────────────────────────────
 export const listMatches = () => listAll('Match');
 
+/**
+ * Item 8: Give admins a view of all matches played.
+ * Give coaches a view limited to matches involving their own players.
+ * Enforce these permissions on the server/API layer.
+ */
+export async function listMatchesForUser(user) {
+  const matches = await listMatches();
+  if (!user || user.role === 'admin') {
+    return matches;
+  }
+  if (user.role === 'coach') {
+    const coachId = user.coachId;
+    const myTeams = coachId ? await listTeamsByCoach(coachId) : [];
+    const myTeamIds = new Set(myTeams.map((t) => t.id));
+    return matches.filter((m) => myTeamIds.has(m.teamAId) || myTeamIds.has(m.teamBId));
+  }
+  if (user.teamId) {
+    return matches.filter((m) => m.teamAId === user.teamId || m.teamBId === user.teamId);
+  }
+  return matches;
+}
+
 export async function createMatches(records) {
   const created = [];
   for (const r of records) {
@@ -349,6 +590,27 @@ export async function deleteMatchesForRound(round) {
 
 // ── Games (playable chess boards — the scored unit) ─────────────────────────
 export const listGames = () => listAll('Game');
+
+/**
+ * Item 8: Server-enforced game listing for admin vs coach.
+ */
+export async function listGamesForUser(user) {
+  const games = await listGames();
+  if (!user || user.role === 'admin') {
+    return games;
+  }
+  if (user.role === 'coach') {
+    const coachId = user.coachId;
+    const myTeams = coachId ? await listTeamsByCoach(coachId) : [];
+    const myTeamIds = new Set(myTeams.map((t) => t.id));
+    return games.filter((g) => myTeamIds.has(g.whiteTeamId) || myTeamIds.has(g.blackTeamId));
+  }
+  if (user.playerId) {
+    return games.filter((g) => g.whitePlayerId === user.playerId || g.blackPlayerId === user.playerId);
+  }
+  return games;
+}
+
 export async function getGame(id) {
   return unwrap(await client.models.Game.get({ id }, PUB)) || null;
 }

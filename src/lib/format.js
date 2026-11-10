@@ -15,9 +15,22 @@ export function fmtScore(n) {
 }
 
 export function teamName(teams, id) {
+  if (id === 'bot_team') return 'Bot Opponents';
   return teams.find((t) => t.id === id)?.name || 'Unknown';
 }
 
 export function teamById(teams, id) {
+  if (id === 'bot_team') {
+    return { id: 'bot_team', name: 'Bot Opponents', state: 'Automated', logoUrl: '' };
+  }
   return teams.find((t) => t.id === id) || null;
 }
+
+export function playerName(players, id) {
+  if (!id) return 'TBD';
+  if (id.startsWith('bot_player') || id === 'bot_opponent') {
+    return 'Checkmate Bot';
+  }
+  return players.find((p) => p.id === id)?.displayName || 'TBD';
+}
+

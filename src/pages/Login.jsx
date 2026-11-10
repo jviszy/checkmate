@@ -44,6 +44,12 @@ export default function Login() {
           <Field label="Email" type="email" value={email} onChange={setEmail} required autoFocus />
           <Field label="Password" type="password" value={password} onChange={setPassword} required />
 
+          <div className="flex justify-end">
+            <Link to="/forgot-password" className="text-xs text-brandred-400 hover:text-brandred-300">
+              Forgot password?
+            </Link>
+          </div>
+
           {error && (
             <div className="flex items-center gap-2 rounded-lg bg-brandred-500/10 px-3 py-2 text-sm text-brandred-400">
               <AlertCircle className="h-4 w-4 shrink-0" /> {error}
