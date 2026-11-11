@@ -71,7 +71,19 @@ async function signUpAndSignIn(email, password) {
     }
   } catch (e) {
     if (e?.name === 'UsernameExistsException') {
-      throw new Error('An account with that email already exists.');
+      // The Cognito account can be left over from an earlier registration that
+      // failed partway, or from a team an admin deleted (deleting app data does
+      // not delete the Cognito user). Reuse the account when the password
+      // matches so the person can register again.
+      try {
+        await amplifySignIn({ username: email, password });
+        return;
+      } catch (signInErr) {
+        if (signInErr?.name === 'UserAlreadyAuthenticatedException') return;
+        throw new Error(
+          'An account with this email already exists. Sign in with that account\'s password, or use "Forgot password" to reset it, then register again.'
+        );
+      }
     }
     if (e?.name === 'InvalidPasswordException') {
       throw new Error('Password must be at least 8 characters.');

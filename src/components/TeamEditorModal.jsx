@@ -255,11 +255,11 @@ export default function TeamEditorModal({ team, players, onClose, isAdmin = fals
 
   // ── Delete player ─────────────────────────────────────────────────────────
   const handleDeletePlayer = async (player) => {
-    if (roster.length <= 2) {
-      setActionError('Cannot remove member: Teams must maintain a minimum of 2 members (excluding the coach).');
-      return;
-    }
-    if (!confirm(`Are you sure you want to remove "${player.displayName}" from ${team.name}?`)) {
+    const remaining = roster.length - 1;
+    const message = remaining < 2
+      ? `Removing "${player.displayName}" leaves ${team.name} with ${remaining} member(s), below the minimum of 2. The team will not be eligible to compete until it has 2 to 5 members again (undersized teams are deleted at reconciliation). Remove anyway?`
+      : `Are you sure you want to remove "${player.displayName}" from ${team.name}?`;
+    if (!confirm(message)) {
       return;
     }
     setActionError('');

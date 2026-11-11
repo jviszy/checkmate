@@ -9,6 +9,10 @@
  *
  * Can be run via Node: `node scripts/reconcile-team-sizes.js`
  * Also callable in-app via `reconcileTeamSizes()` in `src/lib/api.js`.
+ *
+ * NOTE: Deletes and updates require admin (Cognito Admins group) credentials.
+ * The reliable path is the "Run team size reconciliation" button on the admin
+ * dashboard (Teams & Scores tab), which runs as the signed-in admin.
  */
 
 import { Amplify } from 'aws-amplify';
@@ -66,6 +70,23 @@ export async function runReconciliation() {
 
   let deletedTeamsCount = 0;
   let trimmedPlayersCount = 0;
+
+  // Item 5 data cleanup: normalize "The Legend 1" roster name capitalization.
+  const LEGEND_CANONICAL_NAMES = [
+    'Desola', 'Mayokun Asani', 'Alvin Okunbor', 'Sophia Samson', 'Jadesola Jasmine Oguniyi',
+  ];
+  const legendTeam = teams.find((t) => String(t.name || '').trim().toLowerCase() === 'the legend 1');
+  if (legendTeam) {
+    for (const p of byTeam.get(legendTeam.id) || []) {
+      const match = LEGEND_CANONICAL_NAMES.find(
+        (n) => n.toLowerCase() === String(p.displayName || '').trim().toLowerCase()
+      );
+      if (match && match !== p.displayName) {
+        console.log(`[NORMALIZE NAME] "${p.displayName}" -> "${match}" (The Legend 1)`);
+        await client.models.Player.update({ id: p.id, displayName: match });
+      }
+    }
+  }
 
   for (const team of teams) {
     const roster = byTeam.get(team.id) || [];

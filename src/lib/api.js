@@ -11,12 +11,15 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { client } from './amplify.js';
+import outputs from '../../amplify_outputs.json';
 import { INITIAL_FEN, SEED_TOURNAMENT, SAMPLE_TEAMS, SAMPLE_PLAYERS, SAMPLE_MATCHES, SAMPLE_GAMES } from './seed.js';
 import {
   isRegistrationOpen,
   getRegistrationDeadlineText,
   isEmailExemptTeam,
   makePendingEmailPlaceholder,
+  EXEMPT_EMAIL_TEAM,
+  ROUND_DURATION_MS,
 } from './tournamentConfig.js';
 import { sendRegistrationConfirmation } from './notifications.js';
 
@@ -53,6 +56,30 @@ export function onChange(cb) {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+// The deployed AppSync schema can lag behind the local model definitions
+// (amplify_outputs.json is the deployed truth). Sending a field the deployed
+// input type does not define makes AppSync reject the WHOLE mutation, which is
+// what broke team registration (Team.coachName/coachEmail, Player.phone).
+// Writes are therefore filtered down to the deployed field set.
+const DEPLOYED_FIELDS = (() => {
+  const models = outputs?.data?.model_introspection?.models || {};
+  const map = {};
+  for (const [name, m] of Object.entries(models)) {
+    map[name] = new Set(Object.keys(m.fields || {}));
+  }
+  return map;
+})();
+
+function forModel(modelName, input) {
+  const known = DEPLOYED_FIELDS[modelName];
+  if (!known || !known.size) return input;
+  const out = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (known.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 function unwrap(res) {
   if (res?.errors?.length) {
     throw new Error(res.errors.map((e) => e.message).join('; '));
@@ -195,7 +222,7 @@ export async function createTeam({
 
   let round = 1;
   try { round = (await getTournament())?.currentRound ?? 1; } catch { /* default */ }
-  const team = unwrap(await client.models.Team.create({
+  const team = unwrap(await client.models.Team.create(forModel('Team', {
     name,
     logoUrl,
     status,
@@ -205,7 +232,7 @@ export async function createTeam({
     state,
     round,
     joinCode: genJoinCode(),
-  }));
+  })));
   return after(team);
 }
 
@@ -268,7 +295,7 @@ export async function updateTeam(id, patch, currentUser = null) {
   if (currentUser && currentUser.role !== 'admin') {
     throw new Error('Only administrators can edit team details.');
   }
-  return after(unwrap(await client.models.Team.update({ id, ...patch })));
+  return after(unwrap(await client.models.Team.update({ id, ...forModel('Team', patch) })));
 }
 
 // Item 1: Restricted to admin role; removes team, members, related matches, and games
@@ -300,6 +327,12 @@ export async function deleteTeam(id, currentUser = null) {
     ...targetMatches.map((m) => client.models.Match.delete({ id: m.id })),
     ...targetGames.map((g) => client.models.Game.delete({ id: g.id })),
   ]);
+  // Best effort: remove user profiles tied to this team so those emails can
+  // register again without stale role/team links.
+  try {
+    const profiles = await listAll('UserProfile', { authMode: 'userPool', filter: { teamId: { eq: id } } });
+    await Promise.all(profiles.map((u) => client.models.UserProfile.delete({ id: u.id }).catch(() => {})));
+  } catch { /* ignore */ }
   await client.models.Team.delete({ id });
   return after(true);
 }
@@ -323,29 +356,33 @@ export async function createPlayer({ teamId, displayName, email, phone = '', isC
       throw new Error(`Cannot add member: Team already has the maximum allowed limit of ${MAX_TEAM_MEMBERS} members (excluding the coach).`);
     }
   }
-  const player = unwrap(await client.models.Player.create({
+  const player = unwrap(await client.models.Player.create(forModel('Player', {
     teamId, displayName, email, ...(phone ? { phone } : {}), isCaptain, individualScore,
-  }));
+  })));
   return after(player);
 }
 
 export async function updatePlayer(id, patch) {
-  return after(unwrap(await client.models.Player.update({ id, ...patch })));
+  return after(unwrap(await client.models.Player.update({ id, ...forModel('Player', patch) })));
 }
 
 export async function deletePlayer(id) {
-  const p = await getPlayer(id);
-  if (p?.teamId) {
-    const existing = await listPlayersByTeam(p.teamId);
-    if (existing.length <= MIN_TEAM_MEMBERS) {
-      throw new Error(`Cannot remove member: Teams must maintain a minimum of ${MIN_TEAM_MEMBERS} members (excluding the coach).`);
-    }
-  }
-  // Also clean up any scheduled games involving this player
+  // Members can always be removed, even when it takes the roster below the
+  // 2-member minimum: the minimum is enforced on new registrations and by the
+  // item 6 reconciliation (undersized teams are deleted there). A hard block
+  // here left coaches unable to clean up a half-registered duplicate team.
+  // Clean up any scheduled games involving this player.
   const games = await listAll('Game', {
     filter: { or: [{ whitePlayerId: { eq: id } }, { blackPlayerId: { eq: id } }] }
   });
   await Promise.all(games.filter((g) => g.status === 'scheduled').map((g) => client.models.Game.delete({ id: g.id })));
+  // Best effort: remove the user profile linked to this player, so the person
+  // can register again cleanly. May be denied when run by a non-admin (profiles
+  // are owner/Admins scoped) — ignore failures.
+  try {
+    const profiles = await listAll('UserProfile', { authMode: 'userPool', filter: { playerId: { eq: id } } });
+    await Promise.all(profiles.map((u) => client.models.UserProfile.delete({ id: u.id }).catch(() => {})));
+  } catch { /* non-admin callers cannot see/delete other profiles */ }
   await client.models.Player.delete({ id });
   return after(true);
 }
@@ -435,6 +472,21 @@ export async function reconcileTeamSizes(currentUser = null) {
 
   const deletedTeams = [];
   const trimmedPlayers = [];
+
+  // Normalize "The Legend 1" roster names to the canonical capitalization
+  // (e.g. "Sophia samson" -> "Sophia Samson", "jadesola Jasmine Oguniyi" ->
+  // "Jadesola Jasmine Oguniyi").
+  const legendTeam = allTeams.find((t) => isEmailExemptTeam(t.name));
+  if (legendTeam) {
+    const canonical = EXEMPT_EMAIL_TEAM.players.map((p) => p.displayName);
+    const roster = playersByTeam.get(legendTeam.id) || [];
+    for (const p of roster) {
+      const match = canonical.find((n) => n.toLowerCase() === String(p.displayName || '').trim().toLowerCase());
+      if (match && match !== p.displayName) {
+        await updatePlayer(p.id, { displayName: match });
+      }
+    }
+  }
 
   for (const team of allTeams) {
     const roster = playersByTeam.get(team.id) || [];
@@ -615,8 +667,9 @@ export async function getGame(id) {
   return unwrap(await client.models.Game.get({ id }, PUB)) || null;
 }
 
-// Default time control: 10 minutes each with a 3-second increment per move.
-export const DEFAULT_CLOCK_MS = 10 * 60 * 1000;
+// Default time control: one round duration (10 minutes, from tournamentConfig)
+// with a 3-second increment per move.
+export const DEFAULT_CLOCK_MS = ROUND_DURATION_MS;
 export const DEFAULT_INCREMENT_MS = 3 * 1000;
 
 export async function createGame({
@@ -707,9 +760,15 @@ export async function findUser(email) {
 }
 
 export async function createUser(user) {
-  const created = unwrap(await client.models.UserProfile.create({
-    ...user, email: String(user.email).toLowerCase(),
-  }));
+  const email = String(user.email).toLowerCase();
+  // Upsert: a profile can already exist from an earlier (failed or deleted)
+  // registration with the same email. Creating a duplicate row left accounts
+  // with stale roles/links; update the existing profile instead.
+  const existing = await findUser(email).catch(() => null);
+  if (existing) {
+    return after(unwrap(await client.models.UserProfile.update({ ...user, id: existing.id, email })));
+  }
+  const created = unwrap(await client.models.UserProfile.create({ ...user, email }));
   return after(created);
 }
 

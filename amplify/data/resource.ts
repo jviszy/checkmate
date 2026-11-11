@@ -65,7 +65,10 @@ const schema = a.schema({
     })
     .authorization((allow) => [
       allow.publicApiKey().to(['read']),
-      allow.authenticated().to(['read', 'create', 'update']),
+      // Coaches (any signed-in user in this trust model) must be able to remove
+      // their own roster members — without 'delete' here, every coach-side
+      // member removal fails with a Not Authorized error.
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
       allow.group('Admins'),
     ]),
 
@@ -124,7 +127,9 @@ const schema = a.schema({
     })
     .authorization((allow) => [
       allow.publicApiKey().to(['read']),
-      allow.authenticated().to(['read', 'update']),
+      // 'delete' lets a coach's member removal also clean up that player's
+      // scheduled games (deletePlayer in src/lib/api.js).
+      allow.authenticated().to(['read', 'update', 'delete']),
       allow.group('Admins'),
     ]),
 
