@@ -32,3 +32,4 @@ amplifyconfiguration.json
 
 # AWS credential exports — never commit
 *.csv
+backups/
