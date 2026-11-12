@@ -56,7 +56,7 @@ Tournament Details:
 - Coach: ${coachName || 'Assigned Coach'}
 - Join Code: ${joinCode}
 - Roster: ${members.length} member(s)
-- Competition Date: Friday 13/11/2026 (10:00 - 19:00)
+- Competition Date: Friday 13/11/2026 (10:00 - 10:45)
 - Round Format: 3 rounds (10 minutes each)
 
 All registered teams advance to the Nationals. Good luck with your preparation!

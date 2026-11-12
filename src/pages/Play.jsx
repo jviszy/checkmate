@@ -83,9 +83,12 @@ export default function Play() {
   const isBotBlack = isBotPlayer(game?.blackPlayerId);
   const isBotTurn = (turnColor === 'white' && isBotWhite) || (turnColor === 'black' && isBotBlack);
 
-  // Bot automated opponent move
+  // Bot automated opponent move — driven only by the bot's human opponent
+  // (or admin/coach), so signed-in spectators don't race concurrent writes.
+  const humanColor = isBotWhite && !isBotBlack ? 'black' : isBotBlack && !isBotWhite ? 'white' : null;
+  const drivesBot = isAdmin || coachControls || (myColor && myColor === humanColor);
   useEffect(() => {
-    if (!game || game.status === 'completed' || !isBotTurn) return;
+    if (!game || game.status === 'completed' || !isBotTurn || !drivesBot) return;
     const timer = setTimeout(() => {
       const probe = new Chess(game.fen);
       const moves = probe.moves({ verbose: true });
@@ -117,7 +120,7 @@ export default function Play() {
       }
     }, 700);
     return () => clearTimeout(timer);
-  }, [game?.fen, isBotTurn, game?.status, game?.id, game?.whiteMs, game?.blackMs]);
+  }, [game?.fen, isBotTurn, drivesBot, game?.status, game?.id, game?.whiteMs, game?.blackMs]);
 
   // Apply a move (shared by drag + click). Returns true if legal.
   const applyMove = useCallback((from, to) => {

@@ -41,6 +41,7 @@ export default function DemoMatch() {
   const [result, setResult] = useState(null); // null | 'white' | 'black' | 'draw'
   const [statusText, setStatusText] = useState('Demo Match Live');
   const [demoStep, setDemoStep] = useState(0);
+  const [moveHistory, setMoveHistory] = useState([]);
 
   const chess = useMemo(() => {
     try { return new Chess(fen); } catch { return new Chess(); }
@@ -77,7 +78,7 @@ export default function DemoMatch() {
 
   // Automated bot response when in 'bot' mode and it's Black's turn
   useEffect(() => {
-    if (playMode !== 'bot' || result || turnColor !== 'black' || botThinking) return;
+    if (playMode !== 'bot' || result || turnColor !== 'black') return;
 
     setBotThinking(true);
     const timer = setTimeout(() => {
@@ -99,6 +100,7 @@ export default function DemoMatch() {
 
       setBlackMs((ms) => ms + INCREMENT_MS);
       setFen(probe.fen());
+      setMoveHistory((h) => [...h, chosen.san]);
       setBotThinking(false);
 
       if (probe.isGameOver()) {
@@ -113,7 +115,9 @@ export default function DemoMatch() {
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [fen, turnColor, playMode, result, botThinking]);
+    // botThinking must NOT be a dependency: setBotThinking(true) above would
+    // re-run this effect and its cleanup would cancel the bot's move timer.
+  }, [fen, turnColor, playMode, result]);
 
   // Move application
   const applyMove = useCallback((from, to) => {
@@ -137,6 +141,7 @@ export default function DemoMatch() {
     setSelected(null);
     setHint(null);
     setFen(probe.fen());
+    setMoveHistory((h) => [...h, move.san]);
 
     if (probe.isGameOver()) {
       if (probe.isCheckmate()) {
@@ -211,6 +216,7 @@ export default function DemoMatch() {
     setStatusText('Demo Match Live');
     setClockRunning(true);
     setDemoStep(0);
+    setMoveHistory([]);
   };
 
   const playNextDemoOpeningMove = () => {
@@ -238,7 +244,7 @@ export default function DemoMatch() {
     return styles;
   }, [selected, legalTargets, hint, chess]);
 
-  const moves = chess.history();
+  const moves = moveHistory;
   const movePairs = [];
   for (let i = 0; i < moves.length; i += 2) {
     movePairs.push({ n: i / 2 + 1, w: moves[i], b: moves[i + 1] });

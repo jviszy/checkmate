@@ -379,7 +379,7 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
     if (!activeTeams.length) return alert('No active teams registered to pair.');
 
     if (format === 'tournament-all-students') {
-      if (!confirm('Generate automated 3-round pairings for all students (with Bot matches for unmatched players)? Every player will play 3 rounds (10 mins each) between 10:00 and 19:00 on Friday 13/11/2026.')) return;
+      if (!confirm('Generate automated 3-round pairings for all students (with Bot matches for unmatched players)? Every player will play 3 rounds (10 mins each) between 10:00 and 10:45 on Friday 13/11/2026.')) return;
       for (let r = 1; r <= 3; r++) {
         await deleteMatchesForRound(r);
       }

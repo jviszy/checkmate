@@ -9,8 +9,8 @@
 //   the 3-round requirement.
 // - Item 9: Exactly 3 rounds, each lasting 10 minutes. Round count and duration
 //   are modeled as configuration values. Produces 3 rounds per player.
-// - Item 11: Competition window on Friday 13/11/2026, 10:00 to 19:00. No round
-//   starts before 10:00 or runs past 19:00.
+// - Item 11: Competition window on Friday 13/11/2026, 10:00 to 10:45. No round
+//   starts before 10:00 or runs past 10:45.
 // ─────────────────────────────────────────────────────────────────────────
 
 import {
@@ -28,25 +28,28 @@ export const BOT_PLAYER_NAME = 'Checkmate Bot';
 
 /**
  * Calculate scheduled start times for each round within the competition window.
- * Window: 10:00 to 19:00 on Friday 13/11/2026.
- * All rounds start at or after 10:00 and conclude well before 19:00.
+ * Window: 10:00 to 10:45 on Friday 13/11/2026.
+ * All rounds start at or after 10:00 and conclude by 10:45.
  */
 export function getRoundScheduledTime(roundNumber) {
   // Base date: 2026-11-13
   const [year, month, day] = COMPETITION_WINDOW.DATE.split('-').map(Number);
-  // Schedule round 1 at 10:00, round 2 at 11:30, round 3 at 13:00 (WAT / UTC+1)
+  // Schedule round 1 at 10:00, round 2 at 10:15, round 3 at 10:30 (WAT / UTC+1)
   const hourMap = {
     1: { hour: 10, minute: 0 },
-    2: { hour: 11, minute: 30 },
-    3: { hour: 13, minute: 0 },
+    2: { hour: 10, minute: 15 },
+    3: { hour: 10, minute: 30 },
   };
-  const { hour, minute } = hourMap[roundNumber] || { hour: 10 + (roundNumber - 1) * 2, minute: 0 };
+  const { hour, minute } = hourMap[roundNumber] || { hour: 10, minute: (roundNumber - 1) * 15 };
 
-  // Verify within window constraints (10:00 <= start < 19:00)
-  const startHour = parseInt(COMPETITION_WINDOW.START_TIME.split(':')[0], 10);
-  const endHour = parseInt(COMPETITION_WINDOW.END_TIME.split(':')[0], 10);
+  // Verify within window constraints (start <= round start, round end <= window end)
+  const [startHour, startMinute] = COMPETITION_WINDOW.START_TIME.split(':').map(Number);
+  const [endHour, endMinute] = COMPETITION_WINDOW.END_TIME.split(':').map(Number);
+  const startMins = startHour * 60 + startMinute;
+  const endMins = endHour * 60 + endMinute;
+  const roundStartMins = hour * 60 + minute;
 
-  if (hour < startHour || hour >= endHour) {
+  if (roundStartMins < startMins || roundStartMins + ROUND_DURATION_MINUTES > endMins) {
     throw new Error(`Round start time ${hour}:${minute} is outside competition window ${COMPETITION_WINDOW.START_TIME} - ${COMPETITION_WINDOW.END_TIME}`);
   }
 
