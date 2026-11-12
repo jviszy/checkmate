@@ -10,6 +10,10 @@ export const SERVER_TIMEZONE_OFFSET = '+01:00';
 // Item 4: Registration closes on Thursday 12/11/2026 at 18:00 (Server timezone)
 export const REGISTRATION_DEADLINE_ISO = '2026-11-12T18:00:00+01:00';
 
+// Hard close: when true, registration is closed for everyone regardless of
+// the visitor's device clock (the deadline check below uses local time).
+export const REGISTRATION_HARD_CLOSED = true;
+
 // Item 9: Competition has 3 rounds, each lasting 10 minutes
 export const ROUND_COUNT = 3;
 export const ROUND_DURATION_MINUTES = 10;
@@ -46,6 +50,7 @@ export const EXEMPT_EMAIL_TEAM = {
  * Uses the server timezone comparison (+01:00).
  */
 export function isRegistrationOpen(nowDate = new Date()) {
+  if (REGISTRATION_HARD_CLOSED) return false;
   const deadline = new Date(REGISTRATION_DEADLINE_ISO).getTime();
   return nowDate.getTime() <= deadline;
 }
