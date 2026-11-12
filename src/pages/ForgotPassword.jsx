@@ -31,7 +31,7 @@ export default function ForgotPassword() {
         <KingGlyph className="mx-auto h-12 w-12" />
         <h1 className="mt-4 text-3xl font-semibold text-white">Reset password</h1>
         <p className="mt-2 text-sm text-gray-400">
-          Enter your account email to receive a time-limited password reset link.
+          Enter your account email to receive a time-limited verification code.
         </p>
       </div>
 
@@ -44,13 +44,16 @@ export default function ForgotPassword() {
             <div>
               <h2 className="text-lg font-medium text-white">Check your email</h2>
               <p className="mt-2 text-sm text-gray-300">
-                If an email/password account exists for <span className="font-semibold text-white">{email}</span>, a time-limited reset link has been dispatched.
+                If an email/password account exists for <span className="font-semibold text-white">{email}</span>, a verification code has been sent to that inbox.
               </p>
               <p className="mt-3 text-xs text-gray-400">
-                The link expires in 1 hour. Be sure to check your spam or junk folder if it does not appear in your inbox.
+                The code expires shortly. Be sure to check your spam or junk folder if it does not appear in your inbox.
               </p>
             </div>
-            <div className="pt-2">
+            <div className="space-y-2 pt-2">
+              <Button to={`/reset-password?email=${encodeURIComponent(email.trim().toLowerCase())}`} className="w-full">
+                I have my code — set new password
+              </Button>
               <Button to="/login" variant="outline" className="w-full">
                 <ArrowLeft className="h-4 w-4" /> Back to sign in
               </Button>
@@ -78,7 +81,7 @@ export default function ForgotPassword() {
             )}
 
             <Button as="button" type="submit" className="w-full" disabled={busy}>
-              <Mail className="h-4 w-4" /> {busy ? 'Sending link…' : 'Send reset link'}
+              <Mail className="h-4 w-4" /> {busy ? 'Sending code…' : 'Send verification code'}
             </Button>
 
             <div className="pt-2 text-center">
