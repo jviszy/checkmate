@@ -18,7 +18,7 @@ import {
   fetchUserAttributes,
 } from 'aws-amplify/auth';
 import {
-  findUser, createUser, createPlayer, createTeam, getTeamByJoinCode, listPlayersByTeam,
+  findUser, createUser, createPlayer, updatePlayer, createTeam, getTeamByJoinCode, listPlayersByTeam,
   validateTeamLimits, MAX_TEAM_MEMBERS,
 } from '../lib/api.js';
 import {
@@ -227,14 +227,36 @@ export function AuthProvider({ children }) {
     const team = await getTeamByJoinCode(joinCode);
     if (!team) throw new Error('No team found for that join code.');
 
-    // Enforce 5-member maximum limit before account creation
     const existingPlayers = await listPlayersByTeam(team.id);
-    if (existingPlayers.length >= MAX_TEAM_MEMBERS) {
+    const emailLc = String(email).toLowerCase();
+    const nameLc = String(displayName).trim().toLowerCase();
+    // A coach or captain may have already added this student to the roster.
+    // Link the new account to that existing roster entry instead of creating a
+    // duplicate: match by email, or by name when the roster entry only has a
+    // pending placeholder email.
+    const existing = existingPlayers.find((p) => {
+      const pEmail = String(p.email || '').toLowerCase();
+      if (pEmail === emailLc) return true;
+      const isPlaceholder = pEmail.startsWith('[pending_details');
+      return isPlaceholder && String(p.displayName || '').trim().toLowerCase() === nameLc;
+    });
+
+    // Enforce the 5-member maximum only for genuinely new roster members
+    if (!existing && existingPlayers.length >= MAX_TEAM_MEMBERS) {
       throw new Error(`Cannot join team: Team "${team.name}" already has reached the maximum allowed limit of ${MAX_TEAM_MEMBERS} members (excluding the coach).`);
     }
 
     await signUpAndSignIn(email, password);
-    const player = await createPlayer({ teamId: team.id, displayName, email, isCaptain: false });
+    let player;
+    if (existing) {
+      player = existing;
+      // Fill in the real email on a placeholder roster entry
+      if (String(existing.email || '').toLowerCase() !== emailLc) {
+        try { player = await updatePlayer(existing.id, { email: emailLc }); } catch { /* keep existing */ }
+      }
+    } else {
+      player = await createPlayer({ teamId: team.id, displayName, email, isCaptain: false });
+    }
     await createUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
     setUser({ email, displayName, role: 'player', playerId: player.id, teamId: team.id, coachId: null });
     return { team, player };
