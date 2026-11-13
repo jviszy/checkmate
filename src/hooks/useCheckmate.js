@@ -21,6 +21,14 @@ export function useCheckmate() {
       listTeams(), listPlayers(), listMatches(), listGames(), getTournament(),
     ]);
 
+    // Hide orphaned scheduled boards: games whose match was deleted by an old
+    // regeneration are garbage and must not show up as playable. Live and
+    // completed games stay visible regardless so nobody loses a board mid-game.
+    const matchIdSet = new Set(matches.map((m) => m.id));
+    games = games.filter((g) =>
+      g.status !== 'scheduled' || !g.matchId || matchIdSet.has(g.matchId)
+    );
+
     // Check if any team has more than 5 members
     const teamCounts = {};
     let hasOversizedTeam = false;

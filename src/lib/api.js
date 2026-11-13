@@ -810,14 +810,21 @@ export async function repairTournamentGames(players, currentUser = null, onProgr
   report('Resetting games played before the window…');
   await resetPreCompetitionGames(currentUser);
 
-  // Delete ALL scheduled games, verifying after each pass (a flaky network or
-  // a rejected write must not leave stale boards behind).
+  // Delete the VISIBLE scheduled games (ones tied to a current match, or to
+  // no match), verifying after each pass. Orphaned games — whose match no
+  // longer exists — are already hidden by the UI filter and are left in the
+  // database, so the repair stays small and fast even on a flaky connection.
+  const matches = await listMatches();
+  const matchIdSet = new Set(matches.map((m) => m.id));
+  const isVisibleScheduled = (g) =>
+    g.status === 'scheduled' && (!g.matchId || matchIdSet.has(g.matchId));
+
   let kept = [];
   let deleted = 0;
   for (let pass = 1; pass <= 5; pass++) {
     const games = await listGames();
     kept = games.filter((g) => g.status === 'live' || g.status === 'completed');
-    const stale = games.filter((g) => g.status === 'scheduled');
+    const stale = games.filter(isVisibleScheduled);
     if (!stale.length) break;
     if (pass === 5) {
       throw new Error(`${stale.length} old game(s) could not be deleted after ${pass - 1} passes — check that your account has permission, then click Repair again.`);
@@ -828,8 +835,6 @@ export async function repairTournamentGames(players, currentUser = null, onProgr
     deleted += stale.length - failed.length;
     if (failed.length) report(`${failed.length} deletion(s) failed (${failed[0].error}) — retrying…`);
   }
-
-  const matches = await listMatches();
   const seatedByRound = new Map();
   for (const g of kept) {
     const s = seatedByRound.get(g.round) || new Set();
