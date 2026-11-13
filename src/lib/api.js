@@ -631,12 +631,20 @@ export async function updateMatch(id, patch) {
 }
 
 export async function deleteMatchesForRound(round) {
-  const matches = await listAll('Match', { filter: { round: { eq: round } } });
+  const [matches, allMatches, games] = await Promise.all([
+    listAll('Match', { filter: { round: { eq: round } } }),
+    listAll('Match'),
+    listAll('Game', { filter: { round: { eq: round } } }),
+  ]);
   const ids = new Set(matches.map((m) => m.id));
-  const games = await listAll('Game', { filter: { round: { eq: round } } });
+  const allIds = new Set(allMatches.map((m) => m.id));
+  // Delete this round's matches, plus this round's games that belong to them
+  // OR are orphaned (their match was deleted earlier) — otherwise orphans
+  // accumulate across regenerations and players end up with duplicate boards.
+  const doomedGames = games.filter((g) => !g.matchId || ids.has(g.matchId) || !allIds.has(g.matchId));
   await Promise.all([
     ...matches.map((m) => client.models.Match.delete({ id: m.id })),
-    ...games.filter((g) => ids.has(g.matchId)).map((g) => client.models.Game.delete({ id: g.id })),
+    ...doomedGames.map((g) => client.models.Game.delete({ id: g.id })),
   ]);
   return after(true);
 }
@@ -729,6 +737,74 @@ export async function completeGame(id, result, { fen, pgn } = {}) {
 
   if (game.matchId) await recomputeMatch(game.matchId);
   return after(updated);
+}
+
+/** Run async jobs in parallel chunks (AppSync-friendly). */
+async function inChunks(items, size, fn) {
+  const results = [];
+  for (let i = 0; i < items.length; i += size) {
+    const chunk = items.slice(i, i + size);
+    results.push(...await Promise.all(chunk.map(fn)));
+  }
+  return results;
+}
+
+/** Create many games fast (parallel chunks instead of one-by-one). */
+export async function createGamesBulk(records) {
+  const created = await inChunks(records, 25, (g) =>
+    client.models.Game.create({
+      matchId: g.matchId ?? null, round: g.round ?? 1,
+      whiteTeamId: g.whiteTeamId, whitePlayerId: g.whitePlayerId,
+      blackTeamId: g.blackTeamId, blackPlayerId: g.blackPlayerId,
+      fen: g.fen || INITIAL_FEN, pgn: g.pgn || '', status: 'scheduled',
+      result: null, winnerTeamId: null,
+      clockMs: g.clockMs ?? DEFAULT_CLOCK_MS, incrementMs: g.incrementMs ?? DEFAULT_INCREMENT_MS,
+      whiteMs: g.clockMs ?? DEFAULT_CLOCK_MS, blackMs: g.clockMs ?? DEFAULT_CLOCK_MS,
+      lastMoveAt: null, startedAt: null, endedAt: null,
+    }).then(unwrap)
+  );
+  return after(created);
+}
+
+/**
+ * Repair all boards: delete every SCHEDULED game (orphaned, duplicated, or
+ * stale), keep live and completed games, then rebuild one board per player
+ * per round from the CURRENT matches (so every game points at a real match).
+ * Players already in a kept game for a round are not reseated in that round.
+ */
+export async function repairTournamentGames(players, currentUser = null) {
+  const { generateGamesForMatches } = await import('./matchgen/tournamentPairing.js');
+  const [matches, games] = await Promise.all([listMatches(), listGames()]);
+
+  const kept = games.filter((g) => g.status === 'live' || g.status === 'completed');
+  const stale = games.filter((g) => g.status === 'scheduled');
+
+  const seatedByRound = new Map();
+  for (const g of kept) {
+    const s = seatedByRound.get(g.round) || new Set();
+    if (g.whitePlayerId) s.add(g.whitePlayerId);
+    if (g.blackPlayerId) s.add(g.blackPlayerId);
+    seatedByRound.set(g.round, s);
+  }
+
+  await inChunks(stale, 25, (g) => client.models.Game.delete({ id: g.id }));
+
+  const rebuilt = generateGamesForMatches(matches, players, seatedByRound);
+  await createGamesBulk(rebuilt);
+
+  if (currentUser) {
+    await createAuditLog({
+      adminEmail: currentUser.email || '',
+      adminName: currentUser.displayName || '',
+      action: 'REPAIR_TOURNAMENT_GAMES',
+      targetType: 'Game',
+      targetId: 'bulk',
+      targetName: `${rebuilt.length} game(s)`,
+      details: `Deleted ${stale.length} scheduled game(s) (orphans/duplicates), kept ${kept.length} live/completed, rebuilt ${rebuilt.length} board(s) from ${matches.length} match(es).`,
+    });
+  }
+
+  return { deleted: stale.length, kept: kept.length, created: rebuilt.length };
 }
 
 /**

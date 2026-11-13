@@ -9,7 +9,7 @@ import {
   deleteTeam, updatePlayer, createMatches,
   deleteMatchesForRound, updateTournament, updateTeam, loadSampleData, clearData,
   createGame, completeGame, listAuditLogs, createAuditLog, reconcileTeamSizes,
-  resetPreCompetitionGames,
+  resetPreCompetitionGames, createGamesBulk, repairTournamentGames,
 } from '../lib/api.js';
 import { COMPETITION_WINDOW } from '../lib/tournamentConfig.js';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
@@ -382,6 +382,43 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
     });
   }, [games]);
 
+  const [repairing, setRepairing] = useState(false);
+
+  // Board health: orphaned games (match no longer exists), duplicate seats,
+  // and players with no board in a round.
+  const boardHealth = useMemo(() => {
+    const matchIds = new Set(matches.map((m) => m.id));
+    const isBot = (id) => !id || id.startsWith('bot_player') || id === 'bot_opponent';
+    const orphans = games.filter((g) => g.matchId && !matchIds.has(g.matchId)).length;
+    let dupSeats = 0, unseated = 0;
+    for (let r = 1; r <= 3; r++) {
+      const seat = {};
+      const seated = new Set();
+      for (const g of games.filter((g) => g.round === r)) {
+        for (const pid of [g.whitePlayerId, g.blackPlayerId]) {
+          seated.add(pid);
+          if (!isBot(pid)) seat[pid] = (seat[pid] || 0) + 1;
+        }
+      }
+      dupSeats += Object.values(seat).filter((n) => n > 1).length;
+      unseated += players.filter((p) => !seated.has(p.id)).length;
+    }
+    return { orphans, dupSeats, unseated, broken: orphans > 0 || dupSeats > 0 || unseated > 0 };
+  }, [games, matches, players]);
+
+  const repairBoards = async () => {
+    if (!confirm(`Repair all boards? This deletes every SCHEDULED game (${boardHealth.orphans} orphaned, duplicates included), keeps live and completed games, and rebuilds one board per player per round from the current matches. Players currently mid-game are not disturbed.`)) return;
+    setRepairing(true);
+    try {
+      const { deleted, kept, created } = await repairTournamentGames(players, user);
+      alert(`Repair complete: removed ${deleted} stale game(s), kept ${kept} live/completed, created ${created} fresh board(s). Every player now has one board per round.`);
+    } catch (err) {
+      alert(`Repair failed: ${err.message || err}`);
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   const resetStale = async () => {
     if (!staleGames.length) return alert('No games were played before the competition start.');
     if (!confirm(`Reset ${staleGames.length} game(s) played before 10:00 (WAT)? Their results and awarded points are removed, boards return to the starting position with full clocks, and match scores are recomputed. Games played inside the window are untouched.`)) return;
@@ -414,9 +451,7 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
     if (!confirm(`Assign matches to the ${totalUnassigned} missing team slot(s)? Unmatched teams are paired with each other; an odd team out plays the Bot team. Existing matches are kept.`)) return;
     const { matches: fillMatches, games: fillGames } = generateMissingPairings(teams, players, matches);
     await createMatches(fillMatches);
-    for (const g of fillGames) {
-      await createGame(g);
-    }
+    await createGamesBulk(fillGames);
     alert(`Assigned ${fillMatches.length} new match(es) and ${fillGames.length} board game(s). Every team now has a match in all 3 rounds.`);
   };
 
@@ -439,9 +474,7 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
       }
       const { matches: newMatches, games: newGames } = generateFullTournamentPairings(teams, players);
       await createMatches(newMatches);
-      for (const g of newGames) {
-        await createGame(g);
-      }
+      await createGamesBulk(newGames);
       alert(`Successfully generated 3 rounds: ${newMatches.length} matches and ${newGames.length} student games scheduled! Every player is paired with a student or bot.`);
       return;
     }
@@ -483,6 +516,25 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
           <Button onClick={generate}><Swords className="h-4 w-4" /> Generate</Button>
         </div>
       </Card>
+
+      {/* Board health: orphaned/duplicated games or unseated players */}
+      {boardHealth.broken && (
+        <Card className="border-brandred-500/40 bg-brandred-500/[0.06] p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-medium text-white">Boards need repair</h3>
+              <p className="mt-1 text-sm text-brandred-300">
+                {boardHealth.orphans} game(s) point at deleted matches, {boardHealth.dupSeats} player-round(s) have duplicate boards,
+                and {boardHealth.unseated} player-round(s) have no board. Repair deletes all scheduled games and rebuilds one board
+                per player per round from the current matches — live and completed games are kept.
+              </p>
+            </div>
+            <Button onClick={repairBoards} disabled={repairing} className="shrink-0">
+              <RefreshCw className={`h-4 w-4 ${repairing ? 'animate-spin' : ''}`} /> {repairing ? 'Repairing…' : 'Repair all boards'}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* Pre-competition games: anything played before 10:00 WAT is invalid */}
       {staleGames.length > 0 && (

@@ -320,6 +320,47 @@ function buildPairGames(matchId, r, scheduledAt, teamAId, teamBId, rosterA, rost
 }
 
 /**
+ * Rebuild the board games for EXISTING matches (using their real ids).
+ * `seatedByRound` lists players who already have a kept game in a round
+ * (live/completed) and must not be reseated there. Bot-team matches give
+ * every roster player a bot board; uneven rosters are bot-filled.
+ */
+export function generateGamesForMatches(matches, players, seatedByRound = new Map()) {
+  const rosterOf = (teamId) => players.filter((p) => p.teamId === teamId);
+  const games = [];
+  for (const m of matches) {
+    const r = m.round;
+    if (!r || r < 1 || r > ROUND_COUNT) continue;
+    const seated = seatedByRound.get(r) || new Set();
+    const scheduledAt = m.scheduledAt || getRoundScheduledTime(r);
+
+    if (isBotTeam(m.teamAId) || isBotTeam(m.teamBId)) {
+      const teamId = isBotTeam(m.teamAId) ? m.teamBId : m.teamAId;
+      const roster = rosterOf(teamId).filter((p) => !seated.has(p.id));
+      roster.forEach((player, b) => {
+        const aIsWhite = (b + r) % 2 === 0;
+        const botPlayerId = `${BOT_PLAYER_ID_PREFIX}_r${r}_${player.id}`;
+        games.push({
+          matchId: m.id, round: r,
+          whiteTeamId: aIsWhite ? teamId : BOT_TEAM_ID,
+          whitePlayerId: aIsWhite ? player.id : botPlayerId,
+          blackTeamId: aIsWhite ? BOT_TEAM_ID : teamId,
+          blackPlayerId: aIsWhite ? botPlayerId : player.id,
+          fen: INITIAL_FEN, pgn: '', status: 'scheduled',
+          clockMs: ROUND_DURATION_MS, incrementMs: 3000, scheduledAt,
+          isBotMatch: true,
+        });
+      });
+    } else {
+      const rosterA = rosterOf(m.teamAId).filter((p) => !seated.has(p.id));
+      const rosterB = rosterOf(m.teamBId).filter((p) => !seated.has(p.id));
+      games.push(...buildPairGames(m.id, r, scheduledAt, m.teamAId, m.teamBId, rosterA, rosterB));
+    }
+  }
+  return games;
+}
+
+/**
  * Generate pairings ONLY for teams that are missing a match in one or more
  * rounds, without touching existing matches/games. Missing teams in a round
  * are paired against each other; an odd one out plays the bot team.
