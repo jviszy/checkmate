@@ -19,14 +19,17 @@ export const ROUND_COUNT = 3;
 export const ROUND_DURATION_MINUTES = 10;
 export const ROUND_DURATION_MS = ROUND_DURATION_MINUTES * 60 * 1000;
 
-// Item 11: Competition window on Friday 13/11/2026, 10:00 to 10:45
+// Item 11: Competition window on Friday 13/11/2026.
+// Originally 10:00-10:45; the close was extended to 12:00 on competition day
+// because corrupted pairings kept most students off their boards for the
+// first part of the window.
 export const COMPETITION_WINDOW = {
   DATE: '2026-11-13',
   START_TIME: '10:00',
-  END_TIME: '10:45',
+  END_TIME: '12:00',
   TIMEZONE: '+01:00',
   START_ISO: '2026-11-13T10:00:00+01:00',
-  END_ISO: '2026-11-13T10:45:00+01:00',
+  END_ISO: '2026-11-13T12:00:00+01:00',
 };
 
 // Item 5: Exactly one team of 5 members plus 1 coach may register without an email address

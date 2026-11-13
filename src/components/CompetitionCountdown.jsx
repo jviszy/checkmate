@@ -4,7 +4,9 @@ import {
   getCompetitionPhase,
   msUntilCompetitionStart,
   msUntilCompetitionEnd,
+  COMPETITION_WINDOW,
 } from '../lib/tournamentConfig.js';
+import { serverNow } from '../lib/timeSync.js';
 
 function fmtCountdown(ms) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -32,8 +34,10 @@ export default function CompetitionCountdown({ className = '' }) {
     return () => clearInterval(t);
   }, []);
 
-  const nowDate = new Date(now);
+  void now; // ticker dependency — the real time comes from serverNow()
+  const nowDate = serverNow();
   const phase = getCompetitionPhase(nowDate);
+  const { START_TIME, END_TIME } = COMPETITION_WINDOW;
 
   if (phase === 'before') {
     return (
@@ -42,7 +46,7 @@ export default function CompetitionCountdown({ className = '' }) {
           <div className="rounded-lg bg-white/10 p-2 text-gray-200"><Clock className="h-5 w-5" /></div>
           <div>
             <div className="text-sm font-semibold text-white">Competition starts soon</div>
-            <div className="text-xs text-gray-400">Boards open Friday 13/11/2026 at 10:00 (WAT) and close at 10:45 (WAT).</div>
+            <div className="text-xs text-gray-400">Boards open Friday 13/11/2026 at {START_TIME} (WAT) and close at {END_TIME} (WAT).</div>
           </div>
         </div>
         <div className="font-mono text-2xl font-bold tabular-nums text-white">
@@ -59,7 +63,7 @@ export default function CompetitionCountdown({ className = '' }) {
           <div className="rounded-lg bg-brandred-500/20 p-2 text-brandred-400"><Radio className="h-5 w-5 animate-pulse" /></div>
           <div>
             <div className="text-sm font-semibold text-white">Competition is LIVE — boards are open</div>
-            <div className="text-xs text-gray-300">All games close at 10:45 (WAT). Finish your moves before the clock runs out.</div>
+            <div className="text-xs text-gray-300">All games close at {END_TIME} (WAT). Finish your moves before the clock runs out.</div>
           </div>
         </div>
         <div className="font-mono text-2xl font-bold tabular-nums text-brandred-300">
@@ -74,7 +78,7 @@ export default function CompetitionCountdown({ className = '' }) {
       <div className="rounded-lg bg-white/10 p-2 text-gray-400"><Lock className="h-5 w-5" /></div>
       <div>
         <div className="text-sm font-semibold text-white">Competition closed</div>
-        <div className="text-xs text-gray-400">Play ended Friday 13/11/2026 at 10:45 (WAT). Boards are locked — results are final.</div>
+        <div className="text-xs text-gray-400">Play ended Friday 13/11/2026 at {COMPETITION_WINDOW.END_TIME} (WAT). Boards are locked — results are final.</div>
       </div>
     </div>
   );

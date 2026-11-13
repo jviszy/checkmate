@@ -9,7 +9,8 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { updateGame, completeGame } from '../lib/api.js';
 import { teamById } from '../lib/format.js';
 import { isBotPlayer, isBotTeam } from '../lib/matchgen/tournamentPairing.js';
-import { getCompetitionPhase } from '../lib/tournamentConfig.js';
+import { getCompetitionPhase, COMPETITION_WINDOW } from '../lib/tournamentConfig.js';
+import { serverNow } from '../lib/timeSync.js';
 import CompetitionCountdown from '../components/CompetitionCountdown.jsx';
 
 const BOARD_DARK = '#6b1420';
@@ -46,8 +47,10 @@ export default function Play() {
     return () => clearInterval(t);
   }, [game?.status]);
 
-  // Competition window gate: boards open at 10:00 and lock at 10:45 (WAT).
-  const phase = getCompetitionPhase(new Date(now));
+  // Competition window gate — uses server-synced time so a wrong device
+  // clock can't lock a student out (or let them keep playing after close).
+  void now; // ticker dependency — the real time comes from serverNow()
+  const phase = getCompetitionPhase(serverNow());
   const playLocked = phase !== 'open';
 
   const turnColor = chess.turn() === 'w' ? 'white' : 'black';
@@ -298,8 +301,8 @@ export default function Play() {
               <div className="text-sm">
                 {playLocked ? (
                   phase === 'before'
-                    ? <span className="text-gray-300">Boards are locked until 10:00 (WAT) on Friday 13/11/2026.</span>
-                    : <span className="text-gray-300">The competition closed at 10:45 (WAT) — no more moves can be played.</span>
+                    ? <span className="text-gray-300">Boards are locked until {COMPETITION_WINDOW.START_TIME} (WAT) on Friday 13/11/2026.</span>
+                    : <span className="text-gray-300">The competition closed at {COMPETITION_WINDOW.END_TIME} (WAT) — no more moves can be played.</span>
                 ) : isSpectator ? <span className="text-gray-300">Spectating — moves update live</span>
                   : canMoveNow ? <span className="text-white">Your move ({turnColor})</span>
                   : <span className="text-gray-400">Waiting for {turnColor} to move…</span>}
