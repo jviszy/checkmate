@@ -34,13 +34,11 @@ export const BOT_PLAYER_NAME = 'Checkmate Bot';
 export function getRoundScheduledTime(roundNumber) {
   // Base date: 2026-11-13
   const [year, month, day] = COMPETITION_WINDOW.DATE.split('-').map(Number);
-  // Schedule round 1 at 10:00, round 2 at 10:15, round 3 at 10:30 (WAT / UTC+1)
-  const hourMap = {
-    1: { hour: 10, minute: 0 },
-    2: { hour: 10, minute: 15 },
-    3: { hour: 10, minute: 30 },
-  };
-  const { hour, minute } = hourMap[roundNumber] || { hour: 10, minute: (roundNumber - 1) * 15 };
+  // Schedule rounds 15 minutes apart from the window start (WAT / UTC+1)
+  const [winHour, winMinute] = COMPETITION_WINDOW.START_TIME.split(':').map(Number);
+  const totalMins = winHour * 60 + winMinute + (roundNumber - 1) * 15;
+  const hour = Math.floor(totalMins / 60);
+  const minute = totalMins % 60;
 
   // Verify within window constraints (start <= round start, round end <= window end)
   const [startHour, startMinute] = COMPETITION_WINDOW.START_TIME.split(':').map(Number);

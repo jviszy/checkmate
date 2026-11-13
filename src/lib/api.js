@@ -774,6 +774,12 @@ export async function createGamesBulk(records) {
  */
 export async function repairTournamentGames(players, currentUser = null) {
   const { generateGamesForMatches } = await import('./matchgen/tournamentPairing.js');
+
+  // First neutralize anything played before the window opened (takes back
+  // points and returns those boards to 'scheduled', so the rebuild below
+  // replaces them too and nobody keeps a head start).
+  await resetPreCompetitionGames(currentUser);
+
   const [matches, games] = await Promise.all([listMatches(), listGames()]);
 
   const kept = games.filter((g) => g.status === 'live' || g.status === 'completed');
@@ -888,7 +894,7 @@ export async function resetPreCompetitionGames(currentUser = null) {
       targetType: 'Game',
       targetId: 'bulk',
       targetName: `${stale.length} game(s)`,
-      details: `Reset ${stale.length} game(s) played before the 10:00 WAT competition start; points taken back and ${affectedMatchIds.size} match(es) recomputed.`,
+      details: `Reset ${stale.length} game(s) played before the ${COMPETITION_WINDOW.START_TIME} WAT competition start; points taken back and ${affectedMatchIds.size} match(es) recomputed.`,
     });
   }
 

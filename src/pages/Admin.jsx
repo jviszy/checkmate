@@ -421,7 +421,7 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
 
   const resetStale = async () => {
     if (!staleGames.length) return alert('No games were played before the competition start.');
-    if (!confirm(`Reset ${staleGames.length} game(s) played before 10:00 (WAT)? Their results and awarded points are removed, boards return to the starting position with full clocks, and match scores are recomputed. Games played inside the window are untouched.`)) return;
+    if (!confirm(`Reset ${staleGames.length} game(s) played before ${COMPETITION_WINDOW.START_TIME} (WAT)? Their results and awarded points are removed, boards return to the starting position with full clocks, and match scores are recomputed. Games played inside the window are untouched.`)) return;
     setResetting(true);
     try {
       const { reset, matchesRecomputed } = await resetPreCompetitionGames(user);
@@ -468,7 +468,7 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
     if (!activeTeams.length) return alert('No active teams registered to pair.');
 
     if (format === 'tournament-all-students') {
-      if (!confirm('Generate automated 3-round pairings for all students (with Bot matches for unmatched players)? Every player will play 3 rounds (10 mins each) between 10:00 and 10:45 on Friday 13/11/2026.')) return;
+      if (!confirm(`Generate automated 3-round pairings for all students (with Bot matches for unmatched players)? Every player will play 3 rounds (10 mins each) between ${COMPETITION_WINDOW.START_TIME} and ${COMPETITION_WINDOW.END_TIME} on Friday 13/11/2026.`)) return;
       for (let r = 1; r <= 3; r++) {
         await deleteMatchesForRound(r);
       }
@@ -543,7 +543,7 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
             <div>
               <h3 className="font-medium text-white">Games played before the competition start</h3>
               <p className="mt-1 text-sm text-brandred-300">
-                {staleGames.length} game(s) were played or started before 10:00 (WAT) on 13/11/2026. They are invalid:
+                {staleGames.length} game(s) were played or started before {COMPETITION_WINDOW.START_TIME} (WAT) on 13/11/2026. They are invalid:
                 resetting removes their results and points and returns the boards to the start position.
               </p>
             </div>
