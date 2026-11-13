@@ -11,7 +11,7 @@ import {
   createGame, completeGame, listAuditLogs, createAuditLog, reconcileTeamSizes,
 } from '../lib/api.js';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
-import { generateFullTournamentPairings } from '../lib/matchgen/tournamentPairing.js';
+import { generateFullTournamentPairings, generateMissingPairings, findUnassignedTeamsByRound } from '../lib/matchgen/tournamentPairing.js';
 import { fmtScore, teamName } from '../lib/format.js';
 import { STATES, zoneOfTeam } from '../lib/zones.js';
 import { evaluateNationalsQualification, generateAuditSimulationTeams } from '../lib/scoring.js';
@@ -366,6 +366,27 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
   const activeIds = activeTeams.map((t) => t.id);
   const roundGames = useMemo(() => games.filter((g) => g.round === round), [games, round]);
 
+  // Teams missing a match in any round (so every team can be assigned one).
+  const unassignedByRound = useMemo(
+    () => findUnassignedTeamsByRound(teams, matches),
+    [teams, matches]
+  );
+  const totalUnassigned = useMemo(
+    () => [...unassignedByRound.values()].reduce((n, list) => n + list.length, 0),
+    [unassignedByRound]
+  );
+
+  const assignMissing = async () => {
+    if (!totalUnassigned) return alert('Every team already has a match in all rounds.');
+    if (!confirm(`Assign matches to the ${totalUnassigned} missing team slot(s)? Unmatched teams are paired with each other; an odd team out plays the Bot team. Existing matches are kept.`)) return;
+    const { matches: fillMatches, games: fillGames } = generateMissingPairings(teams, players, matches);
+    await createMatches(fillMatches);
+    for (const g of fillGames) {
+      await createGame(g);
+    }
+    alert(`Assigned ${fillMatches.length} new match(es) and ${fillGames.length} board game(s). Every team now has a match in all 3 rounds.`);
+  };
+
   // Group active teams by geopolitical zone; teams only play within their zone.
   const zoneGroups = useMemo(() => {
     const g = {};
@@ -427,6 +448,31 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
             </select>
           </label>
           <Button onClick={generate}><Swords className="h-4 w-4" /> Generate</Button>
+        </div>
+      </Card>
+
+      {/* Unassigned-team check: every team must have a match in every round */}
+      <Card className={`p-5 ${totalUnassigned ? 'border-amber-500/40 bg-amber-500/[0.06]' : 'border-emerald-500/30 bg-emerald-500/[0.05]'}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-medium text-white">Match assignment check</h3>
+            {totalUnassigned ? (
+              <div className="mt-1 space-y-1 text-sm text-amber-300">
+                {[...unassignedByRound.entries()].map(([r, list]) => list.length ? (
+                  <p key={r}>
+                    Round {r}: {list.length} team(s) without a match — {list.map((t) => t.name).join(', ')}
+                  </p>
+                ) : null)}
+              </div>
+            ) : (
+              <p className="mt-1 text-sm text-emerald-400">All teams have a match in every round. ✓</p>
+            )}
+          </div>
+          {totalUnassigned > 0 && (
+            <Button onClick={assignMissing} className="shrink-0">
+              <Swords className="h-4 w-4" /> Assign missing teams
+            </Button>
+          )}
         </div>
       </Card>
 

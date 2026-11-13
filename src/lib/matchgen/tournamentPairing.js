@@ -261,3 +261,123 @@ export function generateFullTournamentPairings(teams, players) {
     competitionWindow: COMPETITION_WINDOW,
   };
 }
+
+/**
+ * Find, per round, the teams that have no match scheduled.
+ * A team counts as assigned in a round when it appears as teamA or teamB
+ * on any existing match for that round.
+ */
+export function findUnassignedTeamsByRound(teams, existingMatches) {
+  const eligible = teams.filter((t) => t.status !== 'eliminated' && !isBotTeam(t.id));
+  const result = new Map();
+  for (let r = 1; r <= ROUND_COUNT; r++) {
+    const assigned = new Set();
+    for (const m of existingMatches) {
+      if (m.round !== r) continue;
+      if (m.teamAId) assigned.add(m.teamAId);
+      if (m.teamBId) assigned.add(m.teamBId);
+    }
+    result.set(r, eligible.filter((t) => !assigned.has(t.id)));
+  }
+  return result; // Map<round, Team[]>
+}
+
+/** Build the board games for one team-vs-team match (bot fills uneven rosters). */
+function buildPairGames(matchId, r, scheduledAt, teamAId, teamBId, rosterA, rosterB) {
+  const games = [];
+  const maxCount = Math.max(rosterA.length, rosterB.length);
+  for (let b = 0; b < maxCount; b++) {
+    const playerA = rosterA[b] || null;
+    const playerB = rosterB[b] || null;
+    const aIsWhite = (b + r) % 2 === 0;
+    const base = {
+      matchId, round: r, fen: INITIAL_FEN, pgn: '', status: 'scheduled',
+      clockMs: ROUND_DURATION_MS, incrementMs: 3000, scheduledAt,
+    };
+    if (playerA && playerB) {
+      games.push({
+        ...base,
+        whiteTeamId: aIsWhite ? teamAId : teamBId,
+        whitePlayerId: aIsWhite ? playerA.id : playerB.id,
+        blackTeamId: aIsWhite ? teamBId : teamAId,
+        blackPlayerId: aIsWhite ? playerB.id : playerA.id,
+      });
+    } else if (playerA || playerB) {
+      const player = playerA || playerB;
+      const teamId = playerA ? teamAId : teamBId;
+      const botPlayerId = `${BOT_PLAYER_ID_PREFIX}_r${r}_${player.id}`;
+      games.push({
+        ...base,
+        whiteTeamId: aIsWhite ? teamId : BOT_TEAM_ID,
+        whitePlayerId: aIsWhite ? player.id : botPlayerId,
+        blackTeamId: aIsWhite ? BOT_TEAM_ID : teamId,
+        blackPlayerId: aIsWhite ? botPlayerId : player.id,
+        isBotMatch: true,
+      });
+    }
+  }
+  return games;
+}
+
+/**
+ * Generate pairings ONLY for teams that are missing a match in one or more
+ * rounds, without touching existing matches/games. Missing teams in a round
+ * are paired against each other; an odd one out plays the bot team.
+ */
+export function generateMissingPairings(teams, players, existingMatches) {
+  const unassignedByRound = findUnassignedTeamsByRound(teams, existingMatches);
+  const rosterOf = (teamId) => players.filter((p) => p.teamId === teamId);
+
+  const newMatches = [];
+  const newGames = [];
+
+  for (let r = 1; r <= ROUND_COUNT; r++) {
+    const missing = unassignedByRound.get(r) || [];
+    if (!missing.length) continue;
+    const scheduledAt = getRoundScheduledTime(r);
+
+    // Pair missing teams with each other two at a time
+    let idx = 0;
+    let pairNo = 0;
+    while (idx + 1 < missing.length) {
+      const teamA = missing[idx];
+      const teamB = missing[idx + 1];
+      idx += 2;
+      pairNo += 1;
+      const matchId = `match_r${r}_fill${pairNo}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      newMatches.push({
+        id: matchId, round: r, teamAId: teamA.id, teamBId: teamB.id,
+        scoreA: 0, scoreB: 0, scheduledAt, status: 'scheduled',
+      });
+      newGames.push(...buildPairGames(matchId, r, scheduledAt, teamA.id, teamB.id, rosterOf(teamA.id), rosterOf(teamB.id)));
+    }
+
+    // Odd team out plays the bot team
+    if (idx < missing.length) {
+      const uTeam = missing[idx];
+      const matchId = `match_r${r}_fillbot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      newMatches.push({
+        id: matchId, round: r, teamAId: uTeam.id, teamBId: BOT_TEAM_ID,
+        scoreA: 0, scoreB: 0, scheduledAt, status: 'scheduled',
+      });
+      const roster = rosterOf(uTeam.id);
+      for (let b = 0; b < roster.length; b++) {
+        const player = roster[b];
+        const aIsWhite = (b + r) % 2 === 0;
+        const botPlayerId = `${BOT_PLAYER_ID_PREFIX}_r${r}_${player.id}`;
+        newGames.push({
+          matchId, round: r,
+          whiteTeamId: aIsWhite ? uTeam.id : BOT_TEAM_ID,
+          whitePlayerId: aIsWhite ? player.id : botPlayerId,
+          blackTeamId: aIsWhite ? BOT_TEAM_ID : uTeam.id,
+          blackPlayerId: aIsWhite ? botPlayerId : player.id,
+          fen: INITIAL_FEN, pgn: '', status: 'scheduled',
+          clockMs: ROUND_DURATION_MS, incrementMs: 3000, scheduledAt,
+          isBotMatch: true,
+        });
+      }
+    }
+  }
+
+  return { matches: newMatches, games: newGames };
+}

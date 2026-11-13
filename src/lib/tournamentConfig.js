@@ -46,6 +46,31 @@ export const EXEMPT_EMAIL_TEAM = {
 };
 
 /**
+ * Competition phase relative to the fixed window (10:00–10:45 WAT on 13/11/2026).
+ * 'before'  → boards are not open yet
+ * 'open'    → boards are open, play allowed
+ * 'closed'  → window has ended, no more play
+ */
+export function getCompetitionPhase(nowDate = new Date()) {
+  const now = nowDate.getTime();
+  const start = new Date(COMPETITION_WINDOW.START_ISO).getTime();
+  const end = new Date(COMPETITION_WINDOW.END_ISO).getTime();
+  if (now < start) return 'before';
+  if (now >= end) return 'closed';
+  return 'open';
+}
+
+/** Milliseconds until the boards open (0 if already open or closed). */
+export function msUntilCompetitionStart(nowDate = new Date()) {
+  return Math.max(0, new Date(COMPETITION_WINDOW.START_ISO).getTime() - nowDate.getTime());
+}
+
+/** Milliseconds until the boards close (0 if already closed). */
+export function msUntilCompetitionEnd(nowDate = new Date()) {
+  return Math.max(0, new Date(COMPETITION_WINDOW.END_ISO).getTime() - nowDate.getTime());
+}
+
+/**
  * Check whether registration is currently open.
  * Uses the server timezone comparison (+01:00).
  */

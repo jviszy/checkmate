@@ -9,6 +9,8 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { updateGame, completeGame } from '../lib/api.js';
 import { teamById } from '../lib/format.js';
 import { isBotPlayer, isBotTeam } from '../lib/matchgen/tournamentPairing.js';
+import { getCompetitionPhase } from '../lib/tournamentConfig.js';
+import CompetitionCountdown from '../components/CompetitionCountdown.jsx';
 
 const BOARD_DARK = '#6b1420';
 const BOARD_LIGHT = '#efe2cf';
@@ -37,12 +39,16 @@ export default function Play() {
   const [now, setNow] = useState(() => Date.now());
   const flaggedRef = useRef(false);
 
-  // Tick the clock while the game is live.
+  // Tick the clock: fast while the game is live, every second otherwise so
+  // the competition-window gate (10:00 open / 10:45 close) stays current.
   useEffect(() => {
-    if (game?.status !== 'live') return;
-    const t = setInterval(() => setNow(Date.now()), 250);
+    const t = setInterval(() => setNow(Date.now()), game?.status === 'live' ? 250 : 1000);
     return () => clearInterval(t);
   }, [game?.status]);
+
+  // Competition window gate: boards open at 10:00 and lock at 10:45 (WAT).
+  const phase = getCompetitionPhase(new Date(now));
+  const playLocked = phase !== 'open';
 
   const turnColor = chess.turn() === 'w' ? 'white' : 'black';
 
@@ -66,8 +72,8 @@ export default function Play() {
     : user?.playerId && game && user.playerId === game.blackPlayerId ? 'black'
     : null;
   const canControl = useCallback((color) =>
-    game && game.status !== 'completed' && (isAdmin || coachControls || myColor === color),
-    [game, isAdmin, coachControls, myColor]);
+    game && game.status !== 'completed' && !playLocked && (isAdmin || coachControls || myColor === color),
+    [game, isAdmin, coachControls, myColor, playLocked]);
 
   // Flag fall — only the controlling client records it, once.
   useEffect(() => {
@@ -88,7 +94,7 @@ export default function Play() {
   const humanColor = isBotWhite && !isBotBlack ? 'black' : isBotBlack && !isBotWhite ? 'white' : null;
   const drivesBot = isAdmin || coachControls || (myColor && myColor === humanColor);
   useEffect(() => {
-    if (!game || game.status === 'completed' || !isBotTurn || !drivesBot) return;
+    if (!game || game.status === 'completed' || playLocked || !isBotTurn || !drivesBot) return;
     const timer = setTimeout(() => {
       const probe = new Chess(game.fen);
       const moves = probe.moves({ verbose: true });
@@ -120,7 +126,7 @@ export default function Play() {
       }
     }, 700);
     return () => clearTimeout(timer);
-  }, [game?.fen, isBotTurn, drivesBot, game?.status, game?.id, game?.whiteMs, game?.blackMs]);
+  }, [game?.fen, isBotTurn, drivesBot, game?.status, game?.id, game?.whiteMs, game?.blackMs, playLocked]);
 
   // Apply a move (shared by drag + click). Returns true if legal.
   const applyMove = useCallback((from, to) => {
@@ -249,6 +255,10 @@ export default function Play() {
         </div>
       </div>
 
+      {playLocked && game.status !== 'completed' && (
+        <CompetitionCountdown className="mb-6" />
+      )}
+
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div>
           <PlayerBar team={black} player={blackPlayer} clock={fmtClock(liveMs('black'))}
@@ -286,7 +296,11 @@ export default function Play() {
             <Card className="flex items-center gap-3 p-4">
               {isSpectator ? <Eye className="h-5 w-5 text-gray-400" /> : <Radio className="h-5 w-5 text-brandred-400" />}
               <div className="text-sm">
-                {isSpectator ? <span className="text-gray-300">Spectating — moves update live</span>
+                {playLocked ? (
+                  phase === 'before'
+                    ? <span className="text-gray-300">Boards are locked until 10:00 (WAT) on Friday 13/11/2026.</span>
+                    : <span className="text-gray-300">The competition closed at 10:45 (WAT) — no more moves can be played.</span>
+                ) : isSpectator ? <span className="text-gray-300">Spectating — moves update live</span>
                   : canMoveNow ? <span className="text-white">Your move ({turnColor})</span>
                   : <span className="text-gray-400">Waiting for {turnColor} to move…</span>}
               </div>

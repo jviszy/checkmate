@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Radio, CalendarClock, History } from 'lucide-react';
 import { SectionTitle, Card } from '../components/ui.jsx';
 import GameCard from '../components/GameCard.jsx';
+import CompetitionCountdown from '../components/CompetitionCountdown.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -65,6 +66,8 @@ export default function Matches() {
         }
         className="mb-8"
       />
+
+      <CompetitionCountdown className="mb-8" />
 
       {visibleGames.length === 0 ? (
         <Card className="p-12 text-center text-gray-400">

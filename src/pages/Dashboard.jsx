@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Card, StatusPill, TeamMark, Button } from '../components/ui.jsx';
 import GameCard from '../components/GameCard.jsx';
+import CompetitionCountdown from '../components/CompetitionCountdown.jsx';
 import { useCheckmate } from '../hooks/useCheckmate.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { fmtScore } from '../lib/format.js';
@@ -47,6 +48,9 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+      {/* Competition window countdown */}
+      <CompetitionCountdown className="mb-6" />
+
       {/* Header */}
       <div className="flex flex-col gap-5 rounded-2xl border border-white/10 bg-board-grid bg-board-800/60 p-6 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
