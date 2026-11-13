@@ -20,6 +20,7 @@ import {
   makePendingEmailPlaceholder,
   EXEMPT_EMAIL_TEAM,
   ROUND_DURATION_MS,
+  COMPETITION_WINDOW,
 } from './tournamentConfig.js';
 import { sendRegistrationConfirmation } from './notifications.js';
 
@@ -728,6 +729,94 @@ export async function completeGame(id, result, { fen, pgn } = {}) {
 
   if (game.matchId) await recomputeMatch(game.matchId);
   return after(updated);
+}
+
+/**
+ * Reset games that were played BEFORE the competition window opened (10:00 WAT
+ * on 13/11/2026). Boards were playable before the window lock deployed, so any
+ * game completed (or left live) before 10:00 is invalid: take back the points
+ * it awarded, restore the board to the starting position with full clocks, and
+ * recompute the parent match's score/status. Games played inside the window
+ * are untouched. Safe to run more than once.
+ */
+export async function resetPreCompetitionGames(currentUser = null) {
+  const windowStart = new Date(COMPETITION_WINDOW.START_ISO).getTime();
+  const games = await listGames();
+
+  const playedBeforeWindow = (g) => {
+    if (g.status === 'completed') {
+      const ended = g.endedAt ? new Date(g.endedAt).getTime() : 0;
+      return ended < windowStart;
+    }
+    if (g.status === 'live') {
+      const started = g.startedAt || g.lastMoveAt;
+      return !started || new Date(started).getTime() < windowStart;
+    }
+    return false;
+  };
+
+  const stale = games.filter(playedBeforeWindow);
+  if (!stale.length) return { reset: 0, matchesRecomputed: 0 };
+
+  // Take back points awarded by completed stale games (win 1, draw 0.5).
+  const deduct = async (playerId, pts) => {
+    if (!playerId || !pts) return;
+    const p = await getPlayer(playerId);
+    if (!p) return; // bot opponents have no Player record
+    const next = Math.max(0, (Number(p.individualScore) || 0) - pts);
+    await client.models.Player.update({ id: playerId, individualScore: next });
+  };
+
+  const affectedMatchIds = new Set();
+  for (const g of stale) {
+    if (g.status === 'completed') {
+      if (g.result === 'white') await deduct(g.whitePlayerId, 1);
+      else if (g.result === 'black') await deduct(g.blackPlayerId, 1);
+      else if (g.result === 'draw') { await deduct(g.whitePlayerId, 0.5); await deduct(g.blackPlayerId, 0.5); }
+    }
+    const clockMs = g.clockMs || DEFAULT_CLOCK_MS;
+    await client.models.Game.update({
+      id: g.id, status: 'scheduled', result: null, winnerTeamId: null,
+      fen: INITIAL_FEN, pgn: '',
+      whiteMs: clockMs, blackMs: clockMs, lastMoveAt: null,
+      startedAt: null, endedAt: null,
+    });
+    if (g.matchId) affectedMatchIds.add(g.matchId);
+  }
+
+  // Recompute each affected match; a match with no completed/live games left
+  // goes back to 'scheduled'.
+  for (const matchId of affectedMatchIds) {
+    const match = unwrap(await client.models.Match.get({ id: matchId }, PUB));
+    if (!match) continue;
+    const mGames = await listAll('Game', { filter: { matchId: { eq: matchId } } });
+    let a = 0, b = 0, anyLive = false, anyDone = false, allDone = mGames.length > 0;
+    for (const g of mGames) {
+      if (g.status === 'live') anyLive = true;
+      if (g.status !== 'completed') { allDone = false; continue; }
+      anyDone = true;
+      const wPts = g.result === 'white' ? 1 : g.result === 'draw' ? 0.5 : 0;
+      const bPts = g.result === 'black' ? 1 : g.result === 'draw' ? 0.5 : 0;
+      a += g.whiteTeamId === match.teamAId ? wPts : bPts;
+      b += g.blackTeamId === match.teamBId ? bPts : wPts;
+    }
+    const status = allDone ? 'completed' : anyLive ? 'live' : anyDone ? match.status : 'scheduled';
+    await client.models.Match.update({ id: matchId, scoreA: a, scoreB: b, status });
+  }
+
+  if (currentUser) {
+    await createAuditLog({
+      adminEmail: currentUser.email || '',
+      adminName: currentUser.displayName || '',
+      action: 'RESET_PRE_COMPETITION_GAMES',
+      targetType: 'Game',
+      targetId: 'bulk',
+      targetName: `${stale.length} game(s)`,
+      details: `Reset ${stale.length} game(s) played before the 10:00 WAT competition start; points taken back and ${affectedMatchIds.size} match(es) recomputed.`,
+    });
+  }
+
+  return { reset: stale.length, matchesRecomputed: affectedMatchIds.size };
 }
 
 /** Roll a match's completed games up into its team scores. */

@@ -9,7 +9,9 @@ import {
   deleteTeam, updatePlayer, createMatches,
   deleteMatchesForRound, updateTournament, updateTeam, loadSampleData, clearData,
   createGame, completeGame, listAuditLogs, createAuditLog, reconcileTeamSizes,
+  resetPreCompetitionGames,
 } from '../lib/api.js';
+import { COMPETITION_WINDOW } from '../lib/tournamentConfig.js';
 import { generateMatches, FORMATS, DEFAULT_FORMAT } from '../lib/matchgen/index.js';
 import { generateFullTournamentPairings, generateMissingPairings, findUnassignedTeamsByRound } from '../lib/matchgen/tournamentPairing.js';
 import { fmtScore, teamName } from '../lib/format.js';
@@ -360,7 +362,38 @@ function captainOf(players, teamId) {
 }
 
 function MatchesAdmin({ teams, players, matches, games, tournament }) {
+  const { user } = useAuth();
   const [format, setFormat] = useState(DEFAULT_FORMAT);
+  const [resetting, setResetting] = useState(false);
+
+  // Games played before the competition window opened (10:00 WAT) — invalid.
+  const staleGames = useMemo(() => {
+    const windowStart = new Date(COMPETITION_WINDOW.START_ISO).getTime();
+    return games.filter((g) => {
+      if (g.status === 'completed') {
+        const ended = g.endedAt ? new Date(g.endedAt).getTime() : 0;
+        return ended < windowStart;
+      }
+      if (g.status === 'live') {
+        const started = g.startedAt || g.lastMoveAt;
+        return !started || new Date(started).getTime() < windowStart;
+      }
+      return false;
+    });
+  }, [games]);
+
+  const resetStale = async () => {
+    if (!staleGames.length) return alert('No games were played before the competition start.');
+    if (!confirm(`Reset ${staleGames.length} game(s) played before 10:00 (WAT)? Their results and awarded points are removed, boards return to the starting position with full clocks, and match scores are recomputed. Games played inside the window are untouched.`)) return;
+    setResetting(true);
+    try {
+      const { reset, matchesRecomputed } = await resetPreCompetitionGames(user);
+      alert(`Reset ${reset} game(s) and recomputed ${matchesRecomputed} match(es). Boards are ready for the competition window.`);
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const round = tournament?.currentRound ?? 1;
   const activeTeams = teams.filter((t) => t.status === 'active' || t.status === 'advanced');
   const activeIds = activeTeams.map((t) => t.id);
@@ -450,6 +483,24 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
           <Button onClick={generate}><Swords className="h-4 w-4" /> Generate</Button>
         </div>
       </Card>
+
+      {/* Pre-competition games: anything played before 10:00 WAT is invalid */}
+      {staleGames.length > 0 && (
+        <Card className="border-brandred-500/40 bg-brandred-500/[0.06] p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-medium text-white">Games played before the competition start</h3>
+              <p className="mt-1 text-sm text-brandred-300">
+                {staleGames.length} game(s) were played or started before 10:00 (WAT) on 13/11/2026. They are invalid:
+                resetting removes their results and points and returns the boards to the start position.
+              </p>
+            </div>
+            <Button onClick={resetStale} disabled={resetting} className="shrink-0">
+              <RefreshCw className={`h-4 w-4 ${resetting ? 'animate-spin' : ''}`} /> {resetting ? 'Resetting…' : 'Reset invalid games'}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* Unassigned-team check: every team must have a match in every round */}
       <Card className={`p-5 ${totalUnassigned ? 'border-amber-500/40 bg-amber-500/[0.06]' : 'border-emerald-500/30 bg-emerald-500/[0.05]'}`}>
