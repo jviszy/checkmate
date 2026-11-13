@@ -383,6 +383,7 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
   }, [games]);
 
   const [repairing, setRepairing] = useState(false);
+  const [repairMsg, setRepairMsg] = useState('');
 
   // Board health: orphaned games (match no longer exists), duplicate seats,
   // and players with no board in a round.
@@ -409,11 +410,14 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
   const repairBoards = async () => {
     if (!confirm(`Repair all boards? This deletes every SCHEDULED game (${boardHealth.orphans} orphaned, duplicates included), keeps live and completed games, and rebuilds one board per player per round from the current matches. Players currently mid-game are not disturbed.`)) return;
     setRepairing(true);
+    setRepairMsg('Starting repair…');
     try {
-      const { deleted, kept, created } = await repairTournamentGames(players, user);
+      const { deleted, kept, created } = await repairTournamentGames(players, user, setRepairMsg);
+      setRepairMsg('');
       alert(`Repair complete: removed ${deleted} stale game(s), kept ${kept} live/completed, created ${created} fresh board(s). Every player now has one board per round.`);
     } catch (err) {
-      alert(`Repair failed: ${err.message || err}`);
+      setRepairMsg('');
+      alert(`Repair did not finish: ${err.message || err}\n\nClick "Repair all boards" again — it continues safely from where it stopped.`);
     } finally {
       setRepairing(false);
     }
@@ -529,9 +533,12 @@ function MatchesAdmin({ teams, players, matches, games, tournament }) {
                 per player per round from the current matches — live and completed games are kept.
               </p>
             </div>
-            <Button onClick={repairBoards} disabled={repairing} className="shrink-0">
-              <RefreshCw className={`h-4 w-4 ${repairing ? 'animate-spin' : ''}`} /> {repairing ? 'Repairing…' : 'Repair all boards'}
-            </Button>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Button onClick={repairBoards} disabled={repairing}>
+                <RefreshCw className={`h-4 w-4 ${repairing ? 'animate-spin' : ''}`} /> {repairing ? 'Repairing… keep this tab open' : 'Repair all boards'}
+              </Button>
+              {repairMsg && <span className="text-xs text-gray-300">{repairMsg}</span>}
+            </div>
           </div>
         </Card>
       )}

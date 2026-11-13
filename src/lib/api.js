@@ -739,19 +739,43 @@ export async function completeGame(id, result, { fen, pgn } = {}) {
   return after(updated);
 }
 
-/** Run async jobs in parallel chunks (AppSync-friendly). */
-async function inChunks(items, size, fn) {
-  const results = [];
+/**
+ * Run async jobs in parallel chunks (AppSync-friendly), retrying each failed
+ * item up to `retries` times. Never throws mid-way: returns { ok, failed }
+ * where failed carries the last error message per item.
+ */
+async function inChunks(items, size, fn, { retries = 2, onProgress = null } = {}) {
+  const ok = [];
+  const failed = [];
   for (let i = 0; i < items.length; i += size) {
     const chunk = items.slice(i, i + size);
-    results.push(...await Promise.all(chunk.map(fn)));
+    await Promise.all(chunk.map(async (item) => {
+      let lastErr = null;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          ok.push(await fn(item));
+          return;
+        } catch (err) {
+          lastErr = err;
+          await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        }
+      }
+      failed.push({ item, error: lastErr?.message || String(lastErr) });
+    }));
+    onProgress?.(Math.min(i + size, items.length), items.length);
   }
-  return results;
+  return { ok, failed };
+}
+
+/** Throw if an AppSync response carries errors (delete/update don't unwrap). */
+function assertNoErrors(res) {
+  if (res?.errors?.length) throw new Error(res.errors.map((e) => e.message).join('; '));
+  return res?.data;
 }
 
 /** Create many games fast (parallel chunks instead of one-by-one). */
-export async function createGamesBulk(records) {
-  const created = await inChunks(records, 25, (g) =>
+export async function createGamesBulk(records, opts = {}) {
+  const { ok, failed } = await inChunks(records, 20, (g) =>
     client.models.Game.create({
       matchId: g.matchId ?? null, round: g.round ?? 1,
       whiteTeamId: g.whiteTeamId, whitePlayerId: g.whitePlayerId,
@@ -761,9 +785,13 @@ export async function createGamesBulk(records) {
       clockMs: g.clockMs ?? DEFAULT_CLOCK_MS, incrementMs: g.incrementMs ?? DEFAULT_INCREMENT_MS,
       whiteMs: g.clockMs ?? DEFAULT_CLOCK_MS, blackMs: g.clockMs ?? DEFAULT_CLOCK_MS,
       lastMoveAt: null, startedAt: null, endedAt: null,
-    }).then(unwrap)
+    }).then(unwrap), opts
   );
-  return after(created);
+  after(true);
+  if (failed.length && !opts.tolerateFailures) {
+    throw new Error(`${failed.length} of ${records.length} game(s) could not be created. First error: ${failed[0].error}`);
+  }
+  return { created: ok, failed };
 }
 
 /**
@@ -772,19 +800,36 @@ export async function createGamesBulk(records) {
  * per round from the CURRENT matches (so every game points at a real match).
  * Players already in a kept game for a round are not reseated in that round.
  */
-export async function repairTournamentGames(players, currentUser = null) {
+export async function repairTournamentGames(players, currentUser = null, onProgress = null) {
   const { generateGamesForMatches } = await import('./matchgen/tournamentPairing.js');
+  const report = (msg) => onProgress?.(msg);
 
   // First neutralize anything played before the window opened (takes back
   // points and returns those boards to 'scheduled', so the rebuild below
   // replaces them too and nobody keeps a head start).
+  report('Resetting games played before the window…');
   await resetPreCompetitionGames(currentUser);
 
-  const [matches, games] = await Promise.all([listMatches(), listGames()]);
+  // Delete ALL scheduled games, verifying after each pass (a flaky network or
+  // a rejected write must not leave stale boards behind).
+  let kept = [];
+  let deleted = 0;
+  for (let pass = 1; pass <= 5; pass++) {
+    const games = await listGames();
+    kept = games.filter((g) => g.status === 'live' || g.status === 'completed');
+    const stale = games.filter((g) => g.status === 'scheduled');
+    if (!stale.length) break;
+    if (pass === 5) {
+      throw new Error(`${stale.length} old game(s) could not be deleted after ${pass - 1} passes — check that your account has permission, then click Repair again.`);
+    }
+    report(`Deleting ${stale.length} old game(s) (pass ${pass})…`);
+    const { failed } = await inChunks(stale, 20, (g) =>
+      client.models.Game.delete({ id: g.id }).then(assertNoErrors));
+    deleted += stale.length - failed.length;
+    if (failed.length) report(`${failed.length} deletion(s) failed (${failed[0].error}) — retrying…`);
+  }
 
-  const kept = games.filter((g) => g.status === 'live' || g.status === 'completed');
-  const stale = games.filter((g) => g.status === 'scheduled');
-
+  const matches = await listMatches();
   const seatedByRound = new Map();
   for (const g of kept) {
     const s = seatedByRound.get(g.round) || new Set();
@@ -793,10 +838,15 @@ export async function repairTournamentGames(players, currentUser = null) {
     seatedByRound.set(g.round, s);
   }
 
-  await inChunks(stale, 25, (g) => client.models.Game.delete({ id: g.id }));
-
   const rebuilt = generateGamesForMatches(matches, players, seatedByRound);
-  await createGamesBulk(rebuilt);
+  report(`Creating ${rebuilt.length} fresh board(s)…`);
+  const { failed: createFailed } = await createGamesBulk(rebuilt, {
+    tolerateFailures: true,
+    onProgress: (done, total) => report(`Creating boards… ${done}/${total}`),
+  });
+  if (createFailed.length) {
+    throw new Error(`${createFailed.length} of ${rebuilt.length} board(s) could not be created (first error: ${createFailed[0].error}). Click Repair again to finish — already-created boards are replaced safely.`);
+  }
 
   if (currentUser) {
     await createAuditLog({
@@ -806,11 +856,11 @@ export async function repairTournamentGames(players, currentUser = null) {
       targetType: 'Game',
       targetId: 'bulk',
       targetName: `${rebuilt.length} game(s)`,
-      details: `Deleted ${stale.length} scheduled game(s) (orphans/duplicates), kept ${kept.length} live/completed, rebuilt ${rebuilt.length} board(s) from ${matches.length} match(es).`,
+      details: `Deleted ${deleted} scheduled game(s) (orphans/duplicates), kept ${kept.length} live/completed, rebuilt ${rebuilt.length} board(s) from ${matches.length} match(es).`,
     });
   }
 
-  return { deleted: stale.length, kept: kept.length, created: rebuilt.length };
+  return { deleted, kept: kept.length, created: rebuilt.length };
 }
 
 /**
